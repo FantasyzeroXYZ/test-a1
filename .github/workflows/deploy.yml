@@ -1,0 +1,45 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  # 允许在 Actions 标签页手动触发部署
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 使用 npm install 替代 npm ci，以防没有上传 package-lock.json
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      # 关键步骤：创建 .nojekyll 文件
+      # 这告诉 GitHub Pages 不要使用 Jekyll 处理文件
+      # 否则以 _ 开头的文件（如 Vite 生成的 _assets）会被忽略，导致 404
+      - name: Create .nojekyll
+        run: touch dist/.nojekyll
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: deploy
+          force_orphan: true # 每次部署都覆盖历史，保持分支整洁
+          cname: '' # 如果有自定义域名，请在此处设置
