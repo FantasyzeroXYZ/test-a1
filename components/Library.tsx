@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AudioTrack, Language } from '../types';
 import { getTranslation } from '../utils/i18n';
 import { SUPPORTED_AUDIO_TYPES, SUPPORTED_SUBTITLE_TYPES } from '../constants';
@@ -12,6 +12,7 @@ interface LibraryProps {
   onTrackUpdate: (id: string, updates: Partial<AudioTrack>) => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => void;
   onReplaceFile: (trackId: string, file: File) => void;
+  onUpdateTrackUrl?: (trackId: string, newUrl: string) => void; // New callback for network tracks
   onImportLink: (url: string, category: 'music' | 'audiobook') => void;
   onImportSubtitle: (trackId: string, file: File, isSecondary: boolean) => void;
   language: Language;
@@ -24,6 +25,7 @@ export const Library: React.FC<LibraryProps> = ({
   onTrackUpdate,
   onImport,
   onReplaceFile,
+  onUpdateTrackUrl,
   onImportLink,
   onImportSubtitle,
   language
@@ -35,9 +37,17 @@ export const Library: React.FC<LibraryProps> = ({
   
   const [editingTrack, setEditingTrack] = useState<AudioTrack | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editUrl, setEditUrl] = useState('');
 
   const t = getTranslation(language);
   const filteredTracks = tracks.filter(t => t.category === activeTab);
+
+  useEffect(() => {
+    if (editingTrack) {
+        setEditTitle(editingTrack.title);
+        setEditUrl(editingTrack.file ? '' : editingTrack.url);
+    }
+  }, [editingTrack]);
 
   const handleSubFileChange = (e: React.ChangeEvent<HTMLInputElement>, trackId: string, isSecondary: boolean) => {
     if (e.target.files?.[0]) {
@@ -62,13 +72,18 @@ export const Library: React.FC<LibraryProps> = ({
 
   const openEditModal = (track: AudioTrack) => {
     setEditingTrack(track);
-    setEditTitle(track.title);
   };
 
   const saveTrackEdit = () => {
     if (editingTrack) {
       const finalTitle = editTitle.trim() || editingTrack.filename?.replace(/\.[^/.]+$/, '') || editingTrack.title;
       onTrackUpdate(editingTrack.id, { title: finalTitle });
+      
+      // Update URL if it's a network track and URL changed
+      if (!editingTrack.file && editUrl.trim() && editUrl.trim() !== editingTrack.url && onUpdateTrackUrl) {
+          onUpdateTrackUrl(editingTrack.id, editUrl.trim());
+      }
+      
       setEditingTrack(null);
     }
   };
@@ -84,15 +99,10 @@ export const Library: React.FC<LibraryProps> = ({
     if (editingTrack && e.target.files?.[0]) {
       const file = e.target.files[0];
       const newCoverUrl = URL.createObjectURL(file);
-      // We pass coverBlob in updates so storage.ts can persist it
-      // Note: storage.ts needs to handle coverBlob in updateTrackMetadataInDB
       onTrackUpdate(editingTrack.id, { 
         cover: newCoverUrl,
         coverBlob: file 
       });
-      // Update local state to show new cover immediately in modal if needed, 
-      // though onTrackUpdate triggering re-render usually handles parent tracks.
-      // We might need to update editingTrack state to reflect change in the modal preview instantly:
       setEditingTrack(prev => prev ? { ...prev, cover: newCoverUrl, coverBlob: file } : null);
       e.target.value = "";
     }
@@ -110,6 +120,13 @@ export const Library: React.FC<LibraryProps> = ({
   };
 
   const circleActionBtn = "w-7 h-7 rounded-full bg-slate-900/80 backdrop-blur-md flex items-center justify-center text-slate-400 hover:text-white transition-all border border-white/10 shadow-lg active:scale-90 hover:scale-105";
+
+  // Type badge component
+  const TrackTypeBadge = ({ isFile }: { isFile: boolean }) => (
+    <div className={`absolute top-2 left-2 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shadow-sm backdrop-blur-sm border ${isFile ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'}`}>
+        {isFile ? <><i className="fa-solid fa-file-audio mr-1"></i>LOCAL</> : <><i className="fa-solid fa-globe mr-1"></i>NET</>}
+    </div>
+  );
 
   return (
     <div className="w-full h-full mx-auto p-4 md:p-6 animate-fade-in pb-32 overflow-y-auto no-scrollbar">
@@ -161,6 +178,8 @@ export const Library: React.FC<LibraryProps> = ({
                  className="relative w-full aspect-[1/1] bg-slate-800 rounded-2xl overflow-hidden cursor-pointer border border-slate-700/50 group-hover:border-indigo-500/50 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.2)] transition-all duration-300 shadow-md"
                  onClick={() => onTrackSelect(track)}
                >
+                 <TrackTypeBadge isFile={!!track.file} />
+                 
                  {track.cover ? (
                    <img src={track.cover} alt="" className="w-full h-full object-cover" />
                  ) : (
@@ -209,10 +228,10 @@ export const Library: React.FC<LibraryProps> = ({
           {filteredTracks.map(track => (
             <div 
               key={track.id} 
-              className="flex items-center gap-4 bg-slate-800/40 hover:bg-slate-800/80 border border-slate-700/50 p-3 rounded-2xl transition-all cursor-pointer group"
+              className="flex items-center gap-4 bg-slate-800/40 hover:bg-slate-800/80 border border-slate-700/50 p-3 rounded-2xl transition-all cursor-pointer group relative"
               onClick={() => onTrackSelect(track)}
             >
-               <div className="w-12 h-12 rounded-xl bg-slate-900 overflow-hidden shrink-0 border border-slate-700">
+               <div className="w-12 h-12 rounded-xl bg-slate-900 overflow-hidden shrink-0 border border-slate-700 relative">
                   {track.cover ? (
                     <img src={track.cover} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -220,6 +239,13 @@ export const Library: React.FC<LibraryProps> = ({
                        <i className={`fa-solid ${track.category === 'music' ? 'fa-music' : 'fa-book-open'} text-lg opacity-40`}></i>
                     </div>
                   )}
+                  <div className="absolute top-0 left-0">
+                      {!!track.file ? (
+                          <div className="w-3 h-3 bg-emerald-500 rounded-br flex items-center justify-center"><i className="fa-solid fa-file text-[6px] text-white"></i></div>
+                      ) : (
+                          <div className="w-3 h-3 bg-cyan-500 rounded-br flex items-center justify-center"><i className="fa-solid fa-globe text-[6px] text-white"></i></div>
+                      )}
+                  </div>
                </div>
                <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-bold text-slate-300 truncate group-hover:text-white">{track.title}</h3>
@@ -333,18 +359,35 @@ export const Library: React.FC<LibraryProps> = ({
                 </div>
 
                 <div className="pt-4 border-t border-slate-800">
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3 px-1">文件关联</label>
-                   <div className="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
-                      <p className="text-[10px] text-slate-400 mb-3 break-all flex items-center gap-2">
-                        <i className="fa-solid fa-file-audio text-amber-500/50"></i>
-                        {editingTrack.filename || "未关联文件"}
-                      </p>
-                      <label className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
-                         <i className="fa-solid fa-link"></i>
-                         重新关联音频
-                         <input type="file" accept={SUPPORTED_AUDIO_TYPES} className="hidden" onChange={handleFileReplace} />
-                      </label>
-                   </div>
+                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3 px-1">音频源</label>
+                   
+                   {!!editingTrack.file ? (
+                       <div className="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
+                          <p className="text-[10px] text-slate-400 mb-3 break-all flex items-center gap-2">
+                            <i className="fa-solid fa-file-audio text-amber-500/50"></i>
+                            {editingTrack.filename || "本地文件"}
+                          </p>
+                          <label className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
+                             <i className="fa-solid fa-rotate"></i>
+                             重新关联音频文件
+                             <input type="file" accept={SUPPORTED_AUDIO_TYPES} className="hidden" onChange={handleFileReplace} />
+                          </label>
+                       </div>
+                   ) : (
+                        <div className="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
+                          <p className="text-[10px] text-slate-400 mb-3 break-all flex items-center gap-2">
+                            <i className="fa-solid fa-globe text-cyan-500/50"></i>
+                            网络链接
+                          </p>
+                          <input 
+                            type="text" 
+                            value={editUrl}
+                            onChange={(e) => setEditUrl(e.target.value)}
+                            placeholder="https://..."
+                            className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:border-cyan-500 outline-none text-xs transition-all shadow-inner mb-2"
+                          />
+                        </div>
+                   )}
                 </div>
               </div>
 

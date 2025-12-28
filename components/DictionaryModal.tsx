@@ -4,7 +4,6 @@ import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, Segmentat
 import { getTranslation } from '../utils/i18n';
 import { segmentText, isWord, isNonSpacedLang } from '../utils/textUtils';
 import { lookupWord } from '../services/dictionaryService';
-import * as AnkiService from '../services/ankiService';
 
 // Define a common interface for icon props to allow className
 interface IconProps {
@@ -16,7 +15,6 @@ const SearchIcon = memo(({ className }: IconProps) => <i className={`fa-solid fa
 const AnkiIcon = memo(({ className }: IconProps) => <i className={`fa-solid fa-graduation-cap ${className || ''}`}></i>);
 const LoaderIcon = memo(({ className }: IconProps) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className || ''}`}><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>);
 const XIcon = memo(({ className }: IconProps) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || ''}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>);
-// Changed AppendIcon to fa-plus
 const AppendIcon = memo(({ className }: IconProps) => <i className={`fa-solid fa-plus ${className || ''}`}></i>); 
 
 // Base URLs for different search engines
@@ -53,10 +51,9 @@ export const DictionaryModal: React.FC<Props> = ({
   const [data, setData] = useState<DictionaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [customDef, setCustomDef] = useState('');
   const [activeTab, setActiveTab] = useState<DictionaryTab>('dictionary'); // 默认标签页
   const [userscriptHtmlContent, setUserscriptHtmlContent] = useState<string>('');
-  const [webCustomNotes, setWebCustomNotes] = useState(''); // New state for web tab custom notes
+  const [webCustomNotes, setWebCustomNotes] = useState(''); // Only for web tab
   const [currentAppendSegmentIndex, setCurrentAppendSegmentIndex] = useState<number>(-1); // 用于追加分词
   
   // Refs for content extraction
@@ -77,12 +74,9 @@ export const DictionaryModal: React.FC<Props> = ({
   // 重置追加分词索引
   useEffect(() => {
     if (isOpen) {
-      // 每次打开时，如果初始词是有效的，设置追加起始点为初始词的下一个
-      // 如果初始词不在分词列表中，或者分词列表为空，则设置为0
       const initialWordSegments = segmentText(initialWord, learningLanguage, segmentationMode);
       if (initialWordSegments.length > 0) {
         let foundIndex = -1;
-        // 尝试找到 initialWord 在 sentenceSegments 中的位置
         for(let i=0; i < sentenceSegments.length; i++) {
           if (sentenceSegments[i] === initialWordSegments[0]) {
             foundIndex = i;
@@ -102,17 +96,15 @@ export const DictionaryModal: React.FC<Props> = ({
   // 油猴脚本通信 - 接收消息 (VAM_SEARCH_RESPONSE)
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      // 检查消息来源和结构，确保是来自期望的油猴脚本
       if (event.data && typeof event.data === 'object' && event.data.type === 'VAM_SEARCH_RESPONSE') {
         const payload = event.data.payload;
-        // 如果有 HTML 内容，则更新显示
         if (payload && payload.html) {
             setUserscriptHtmlContent(payload.html);
         } else if (payload && payload.error) {
             setUserscriptHtmlContent(`<div class="text-red-400 p-4 text-center">${payload.error}</div>`);
         }
         
-        if (activeTab === 'userscript') { // 只有当前标签页是油猴时才关闭 loading
+        if (activeTab === 'userscript') {
           setLoading(false); 
         }
       }
@@ -125,9 +117,6 @@ export const DictionaryModal: React.FC<Props> = ({
   useEffect(() => {
     if (isOpen) {
       setSearchQuery(initialWord);
-      setCustomDef('');
-      // 每次打开或 initialWord 改变时，根据当前激活的 Tab 进行查询
-      // 之前是强制 fetch 'dictionary'，导致在油猴标签页点击单词不更新
       fetchData(initialWord, activeTab); 
     }
   }, [initialWord, isOpen]);
@@ -136,8 +125,6 @@ export const DictionaryModal: React.FC<Props> = ({
     if (!term.trim()) return;
     setLoading(true);
     setError('');
-    // setData(null); // 不清空旧数据，可以在加载新数据时继续显示旧数据
-    // setUserscriptHtmlContent(''); 
 
     if (targetTab === 'dictionary') {
       const result = await lookupWord(term, learningLanguage);
@@ -145,37 +132,33 @@ export const DictionaryModal: React.FC<Props> = ({
         setData(result);
       } else {
         setError(t.dictNoResult);
-        setData(null); // 明确设置无结果
+        setData(null); 
       }
       setLoading(false);
     } else if (targetTab === 'userscript') {
-      // 发送消息给油猴脚本 (VAM_SEARCH_REQUEST)
       window.postMessage({
         type: 'VAM_SEARCH_REQUEST',
         payload: {
             word: term,
             lang: learningLanguage
         }
-      }, '*'); // 实际应用中应指定更安全的 targetOrigin
-      // 注意：油猴脚本的响应是异步的，这里的 loading 会在 message 事件中收到响应后关闭
+      }, '*');
     } else {
-      setLoading(false); // 网页标签页不涉及直接的数据加载
+      setLoading(false); 
     }
   };
 
   const handleSearch = () => {
-    fetchData(searchQuery); // 使用当前活动标签页进行查询
+    fetchData(searchQuery); 
   };
 
   const handleSegmentClick = (segment: string, index: number) => {
     setSearchQuery(segment);
-    // 设置追加起始点为当前点击词的下一个有效分词（非空格，非标点）
     let nextAppendIndex = index + 1;
     while(nextAppendIndex < sentenceSegments.length && !isWord(sentenceSegments[nextAppendIndex])) {
         nextAppendIndex++;
     }
     setCurrentAppendSegmentIndex(nextAppendIndex);
-    // Explicitly pass activeTab to ensure we query the correct source immediately
     fetchData(segment, activeTab);
   };
 
@@ -183,7 +166,6 @@ export const DictionaryModal: React.FC<Props> = ({
     if (sentenceSegments.length === 0) return;
 
     let nextWordIndex = -1;
-    // 从 currentAppendSegmentIndex 开始查找下一个有效单词
     for (let i = currentAppendSegmentIndex; i < sentenceSegments.length; i++) {
       if (isWord(sentenceSegments[i])) {
         nextWordIndex = i;
@@ -192,20 +174,16 @@ export const DictionaryModal: React.FC<Props> = ({
     }
 
     if (nextWordIndex === -1) {
-      // 如果没有更多单词可追加，则重置追加点到 initialSegmentIndex
-      setCurrentAppendSegmentIndex(0); // 重置到开头
+      setCurrentAppendSegmentIndex(0); 
       return;
     }
 
     let newQuery = searchQuery;
     const nextSegmentToAppend = sentenceSegments[nextWordIndex];
 
-    // If searchQuery is not empty, try to determine if a space is needed
     if (newQuery.length > 0) {
-        // Attempt to find the index of the last part of searchQuery within sentenceSegments
         let lastQueryPartIndexInSentence = -1;
         let tempQuery = newQuery;
-        // Iterate backwards through sentenceSegments to find matching tail of newQuery
         for (let i = nextWordIndex - 1; i >= 0; i--) {
             if (tempQuery.endsWith(sentenceSegments[i])) {
                 tempQuery = tempQuery.slice(0, tempQuery.length - sentenceSegments[i].length);
@@ -217,39 +195,31 @@ export const DictionaryModal: React.FC<Props> = ({
         }
 
         if (lastQueryPartIndexInSentence !== -1 && lastQueryPartIndexInSentence < nextWordIndex) {
-            // Check for actual space segments in the original sentence between lastQueryPartIndexInSentence and nextWordIndex
             let needsSpace = false;
             for (let i = lastQueryPartIndexInSentence + 1; i < nextWordIndex; i++) {
-                if (sentenceSegments[i].match(/\s/)) { // If we find an explicit space segment
+                if (sentenceSegments[i].match(/\s/)) { 
                     needsSpace = true;
                     break;
                 }
             }
-            // If it needs space but doesn't have it, or doesn't need it but has it
             if (needsSpace && !newQuery.endsWith(' ')) {
                 newQuery += ' ';
             } else if (!needsSpace && newQuery.endsWith(' ')) {
-                newQuery = newQuery.trimEnd(); // Remove trailing space if not needed
+                newQuery = newQuery.trimEnd(); 
             }
         } else {
-            // Fallback for when searchQuery doesn't map cleanly or is just a single word initially
-            // Add a space if it's a spaced language AND the previous char in query isn't a space already
             if (!isNonSpacedLang(learningLanguage) && !newQuery.endsWith(' ')) {
                 newQuery += ' ';
             }
         }
     }
     newQuery += nextSegmentToAppend;
-    setSearchQuery(newQuery.trim()); // Trim to clean up any leading/trailing spaces from complex logic
-    setCurrentAppendSegmentIndex(nextWordIndex + 1); // Update to the next word after the one just appended
+    setSearchQuery(newQuery.trim()); 
+    setCurrentAppendSegmentIndex(nextWordIndex + 1); 
     fetchData(newQuery.trim(), activeTab);
 
   }, [searchQuery, sentenceSegments, currentAppendSegmentIndex, fetchData, learningLanguage, segmentationMode, activeTab]);
 
-  /**
-   * Helper to capture audio from the player for the current subtitle segment.
-   * Resolves with Base64 audio string or undefined if failed.
-   */
   const captureAudioSequence = (): Promise<string | undefined> => {
     return new Promise(async (resolve) => {
         const audioEl = audioRef?.current;
@@ -328,22 +298,17 @@ export const DictionaryModal: React.FC<Props> = ({
     
     setIsProcessing(true); // Show loading state
 
-    let finalDefinition = customDef;
+    let finalDefinition = '';
 
-    // Get definition from tabs if custom is empty
-    if (!finalDefinition) {
-      if (activeTab === 'dictionary' && dictionaryContentRef.current) {
-        // 获取词典标签页的完整 HTML 内容
-        finalDefinition = dictionaryContentRef.current.innerHTML;
-      } else if (activeTab === 'userscript' && userscriptOutputRef.current) {
-        // 获取油猴标签页的完整 HTML 内容
-        finalDefinition = userscriptOutputRef.current.innerHTML;
-      } else if (activeTab === 'web' && webCustomNotes) {
-        finalDefinition = webCustomNotes;
-      } else if (activeTab === 'dictionary' && data?.entries?.[0]?.senses?.[0]) {
-        // Fallback if ref is somehow missing but data exists (unlikely)
-        finalDefinition = data.entries[0].senses[0].definition;
-      }
+    // Get definition from tabs
+    if (activeTab === 'dictionary' && dictionaryContentRef.current) {
+      finalDefinition = dictionaryContentRef.current.innerHTML;
+    } else if (activeTab === 'userscript' && userscriptOutputRef.current) {
+      finalDefinition = userscriptOutputRef.current.innerHTML;
+    } else if (activeTab === 'web' && webCustomNotes) {
+      finalDefinition = webCustomNotes;
+    } else if (activeTab === 'dictionary' && data?.entries?.[0]?.senses?.[0]) {
+      finalDefinition = data.entries[0].senses[0].definition;
     }
 
     try {
@@ -357,9 +322,7 @@ export const DictionaryModal: React.FC<Props> = ({
         let sentenceWithHighlight = contextLine.text;
         if (searchQuery) {
             try {
-                // Escape special characters in search query for regex
                 const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                // Case-insensitive replacement ensuring we don't mess up existing tags (though text should be plain)
                 const regex = new RegExp(`(${escapedQuery})`, 'gi');
                 sentenceWithHighlight = sentenceWithHighlight.replace(regex, '<b>$1</b>');
             } catch (e) {
@@ -370,7 +333,6 @@ export const DictionaryModal: React.FC<Props> = ({
         await onAddToAnki(finalDefinition || searchQuery, sentenceWithHighlight, recordedAudio);
     } catch (e) {
         console.error(e);
-        // Error handling usually done in onAddToAnki or App.tsx, but ensure we reset state
     } finally {
         setIsProcessing(false);
     }
@@ -386,7 +348,7 @@ export const DictionaryModal: React.FC<Props> = ({
   return (
     <>
       {isOpen && !isSidebar && <div className="fixed inset-0 bg-black/40 z-[90]" onClick={onClose} />}
-      <div id="dictionary-panel" className={`${isSidebar ? 'fixed top-0 right-0 h-full w-full md:w-[450px] border-l' : 'fixed bottom-0 left-0 right-0 h-[80vh] rounded-t-2xl border-t'} bg-slate-900 border-white/10 shadow-2xl z-[100] transition-transform duration-300 transform ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div id="dictionary-panel" className={`${isSidebar ? 'fixed top-0 right-0 h-full w-full md:w-[450px] border-l' : 'fixed bottom-0 left-0 right-0 h-[80dvh] rounded-t-2xl border-t'} bg-slate-900 border-white/10 shadow-2xl z-[100] transition-transform duration-300 transform ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="flex flex-col h-full overflow-hidden">
           {/* Header with Search and Actions */}
           <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
@@ -404,7 +366,6 @@ export const DictionaryModal: React.FC<Props> = ({
               )}
             </div>
             <div className="flex items-center gap-2">
-              {/* Anki Button: Auto-records if audio field exists */}
               <button 
                 onClick={handleAddClick} 
                 disabled={isProcessing || isAddingToAnki} 
@@ -419,7 +380,7 @@ export const DictionaryModal: React.FC<Props> = ({
 
           {/* Sentence for segmentation and word click */}
           {sentenceSegments.length > 0 && (
-            <div className="bg-slate-800/50 p-3 text-center border-b border-white/10 overflow-x-auto whitespace-nowrap text-sm text-slate-400 select-text no-scrollbar">
+            <div className="bg-slate-800/50 p-3 text-center border-b border-white/10 overflow-x-auto whitespace-nowrap text-sm text-slate-400 select-text no-scrollbar shrink-0">
               {sentenceSegments.map((seg, idx) => {
                 const regex = new RegExp(`\\b${searchQuery.trim()}\\b`, 'i');
                 const isHighlighted = isWord(seg) && searchQuery.trim() !== '' && regex.test(seg);
@@ -466,7 +427,7 @@ export const DictionaryModal: React.FC<Props> = ({
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 overflow-hidden relative"> 
+          <div className="flex-1 overflow-hidden relative flex flex-col"> 
             {activeTab === 'dictionary' && (
               <div className="flex-1 overflow-y-auto p-6 space-y-6 relative" ref={dictionaryContentRef}>
                 {loading && (
@@ -497,20 +458,21 @@ export const DictionaryModal: React.FC<Props> = ({
             )}
 
             {activeTab === 'web' && (
-              <div className="flex-1 flex flex-col relative overflow-hidden">
+              <div className="flex-1 flex flex-col relative overflow-hidden h-full">
                 <iframe 
                   src={webIframeSrc} 
-                  className="flex-1 w-full h-full border-0 bg-slate-900" 
+                  className="flex-1 w-full border-0 bg-slate-900" 
                   title={`${webSearchEngine} search for ${searchQuery}`}
                 ></iframe>
-                <div className="mt-4 pt-4 border-t border-white/5 p-6 shrink-0">
+                {/* Custom Notes only for Web tab */}
+                <div className="border-t border-white/5 p-4 shrink-0 bg-slate-900 z-10">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">{t.webCustomNotes}</label>
                   <textarea 
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500"
                     placeholder={t.dictCustomPlaceholder}
                     value={webCustomNotes}
                     onChange={e => setWebCustomNotes(e.target.value)}
-                    rows={3}
+                    rows={2}
                   />
                 </div>
               </div>
@@ -528,18 +490,8 @@ export const DictionaryModal: React.FC<Props> = ({
                 </div>
               </div>
             )}
-
-            {/* Custom Definition for Anki */}
-            <div className="mt-4 pt-4 border-t border-white/5 p-6 shrink-0">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">{t.ankiCustomDef}</label>
-              <textarea 
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500"
-                placeholder={t.dictCustomPlaceholder}
-                value={customDef}
-                onChange={e => setCustomDef(e.target.value)}
-                rows={3}
-              />
-            </div>
+            
+            {/* Removed the shared "Custom Definition" textarea that was here previously */}
           </div>
         </div>
       </div>

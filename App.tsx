@@ -14,7 +14,40 @@ import { DictionaryModal } from './components/DictionaryModal';
 import { Library } from './components/Library';
 import { SidePanel } from './components/SidePanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { BookmarkModal } from './components/BookmarkModal'; // Import new BookmarkModal
+import { BookmarkModal } from './components/BookmarkModal';
+
+// Simple Toast Component for notifications
+const Toast = ({ message, onClose }: { message: string | null, onClose: () => void }) => {
+  useEffect(() => {
+    if (message) {
+      const timer = setTimeout(onClose, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [message, onClose]);
+
+  if (!message) return null;
+
+  return (
+    <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[200] animate-bounce-in pointer-events-none">
+      <div className="bg-slate-800/90 backdrop-blur-md border border-indigo-500/50 px-6 py-3 rounded-full shadow-2xl flex items-center gap-3">
+        <i className="fa-solid fa-circle-check text-green-400 text-lg"></i>
+        <span className="text-white font-bold text-sm">{message}</span>
+      </div>
+    </div>
+  );
+};
+
+// Check for iOS
+const isIOS = () => {
+  return [
+    'iPad Simulator',
+    'iPhone Simulator',
+    'iPod Simulator',
+    'iPad',
+    'iPhone',
+    'iPod'
+  ].includes(navigator.platform) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+};
 
 const loadConfig = <T,>(key: string, fallback: T): T => {
   try {
@@ -54,7 +87,7 @@ const App: React.FC = () => {
   const [gameType, setGameType] = useState<GameType>(() => loadConfig('lf_gameType', 'none'));
   const [segmentationMode, setSegmentationMode] = useState<SegmentationMode>(() => loadConfig('lf_segMode', 'browser'));
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>(() => loadConfig('lf_playMode', 'normal'));
-  const [webSearchEngine, setWebSearchEngine] = useState<WebSearchEngine>(() => loadConfig('lf_webSearchEngine', 'google')); // New setting
+  const [webSearchEngine, setWebSearchEngine] = useState<WebSearchEngine>(() => loadConfig('lf_webSearchEngine', 'google'));
 
   // Persistence Effects
   useEffect(() => { localStorage.setItem('lf_lang', JSON.stringify(language)); }, [language]);
@@ -67,7 +100,6 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('lf_segMode', JSON.stringify(segmentationMode)); }, [segmentationMode]);
   useEffect(() => { localStorage.setItem('lf_playMode', JSON.stringify(playbackMode)); }, [playbackMode]);
   useEffect(() => { localStorage.setItem('lf_webSearchEngine', JSON.stringify(webSearchEngine)); }, [webSearchEngine]);
-
 
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]); 
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(null);
@@ -96,8 +128,9 @@ const App: React.FC = () => {
 
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
-  const [wasPlayingBeforeModal, setWasPlayingBeforeModal] = useState(false); // For modal audio control
+  const [wasPlayingBeforeModal, setWasPlayingBeforeModal] = useState(false); 
 
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const currentTrack = useMemo(() => audioTracks.find(t => t.id === currentTrackId), [audioTracks, currentTrackId]);
   const currentDisplaySubtitles = useMemo(() => activeSubtitleType === 'primary' ? subtitles : secondarySubtitles, [activeSubtitleType, subtitles, secondarySubtitles]);
@@ -125,7 +158,6 @@ const App: React.FC = () => {
   const handleTimeUpdate = () => {
     if (!audioRef.current) return;
     const curr = audioRef.current.currentTime;
-    // Only update currentTime state if there's a significant difference to avoid excessive re-renders
     if (Math.abs(currentTime - curr) > 0.1) {
         setCurrentTime(curr);
     }
@@ -136,19 +168,11 @@ const App: React.FC = () => {
     }
 
     const newIdx = findSubtitleIndex(currentDisplaySubtitles, curr);
-    
-    // Logic to prevent subtitle "flashback":
-    // If a new subtitle is found and it's different, update to the new index.
     if (newIdx !== -1 && newIdx !== activeSubtitleIndex) {
       setActiveSubtitleIndex(newIdx);
-    } 
-    // If no subtitle is currently active (newIdx === -1) BUT there was an active subtitle before (activeSubtitleIndex !== -1),
-    // and we are moving into a gap *between* subtitles, keep the previous activeSubtitleIndex.
-    // This prevents the subtitle area from briefly becoming blank/unhighlighted.
-    else if (newIdx === -1 && activeSubtitleIndex !== -1) {
-      // Do nothing, keep activeSubtitleIndex as is (showing the last subtitle)
+    } else if (newIdx === -1 && activeSubtitleIndex !== -1) {
+      // Keep previous active
     }
-    // If newIdx is -1 and activeSubtitleIndex is already -1 (e.g., at very beginning or end), no change needed.
   };
 
   const handleShiftTimeline = async (seconds: number) => {
@@ -160,13 +184,10 @@ const App: React.FC = () => {
 
   const handleSaveBookmark = async (bookmark: Bookmark) => {
     if (!currentTrack) return;
-    
     let updatedBookmarks: Bookmark[];
     if (bookmark.id) {
-      // Edit existing bookmark
       updatedBookmarks = (currentTrack.bookmarks || []).map(b => b.id === bookmark.id ? bookmark : b);
     } else {
-      // Add new bookmark
       const newBookmark: Bookmark = {
         ...bookmark,
         id: `bm-${Date.now()}`,
@@ -174,11 +195,8 @@ const App: React.FC = () => {
       };
       updatedBookmarks = [...(currentTrack.bookmarks || []), newBookmark];
     }
-    
     await updateTrackMetadataInDB(currentTrack.id, { bookmarks: updatedBookmarks });
     setAudioTracks(prev => prev.map(t => t.id === currentTrack.id ? { ...t, bookmarks: updatedBookmarks } : t));
-    
-    // Close modal and resume playback if it was playing before
     setShowBookmarkModal(false); 
     setEditingBookmark(null); 
     if (wasPlayingBeforeModal) {
@@ -188,19 +206,18 @@ const App: React.FC = () => {
 
   const handleOpenBookmarkModal = (bookmark?: Bookmark) => {
     setEditingBookmark(bookmark || null);
-    setWasPlayingBeforeModal(isPlaying); // Store current play state
-    safePause(); // Pause audio
+    setWasPlayingBeforeModal(isPlaying); 
+    safePause(); 
     setShowBookmarkModal(true);
   };
 
   const handleCloseBookmarkModal = () => {
     setShowBookmarkModal(false);
     setEditingBookmark(null);
-    if (wasPlayingBeforeModal) { // Resume playback if it was playing before modal opened
+    if (wasPlayingBeforeModal) { 
       safePlay();
     }
   }
-
 
   const handleAddToAnki = async (definition: string, sentence: string, recordedAudioBase64?: string) => {
     if (!currentTrack) return;
@@ -209,12 +226,15 @@ const App: React.FC = () => {
       await AnkiService.addNote(ankiSettings, {
         word: dictionaryTargetWord,
         definition,
-        sentence: sentence, // Use the sentence passed from DictionaryModal (which may include bold tags)
+        sentence: sentence,
         translation: '',
         audioBase64: recordedAudioBase64
       });
-      alert(t.ankiSuccess);
-    } catch (err) { alert(t.ankiError); }
+      // Show toast instead of alert
+      setToastMessage(t.ankiSuccess);
+    } catch (err) { 
+        alert(t.ankiError); 
+    }
     finally { setIsAddingToAnki(false); }
   };
 
@@ -231,7 +251,6 @@ const App: React.FC = () => {
     }, 150);
   };
 
-  // 恢复导入逻辑
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -242,9 +261,9 @@ const App: React.FC = () => {
         id: `track-${Date.now()}`,
         title: file.name.replace(/\.[^/.]+$/, ''),
         filename: file.name,
-        url: URL.createObjectURL(file), // Create a temporary URL for immediate playback
+        url: URL.createObjectURL(file),
         category,
-        file, // Store the File object for IndexedDB
+        file,
         chapters,
         coverBlob,
         cover: coverBlob ? URL.createObjectURL(coverBlob) : undefined,
@@ -252,13 +271,13 @@ const App: React.FC = () => {
         subtitles: [],
         secondarySubtitles: []
       };
-      await saveTrackToDB(newTrack, file); // Save File object
+      await saveTrackToDB(newTrack, file);
       setAudioTracks(prev => [...prev, newTrack]);
     } catch (err) {
       console.error("Failed to import audio:", err);
       alert(t.importError);
     } finally {
-      e.target.value = ''; // Clear input to allow re-importing same file
+      e.target.value = '';
       setIsOpeningTrack(false);
     }
   };
@@ -292,17 +311,21 @@ const App: React.FC = () => {
   const handleImportLink = async (url: string, category: 'music' | 'audiobook') => {
     setIsOpeningTrack(true);
     try {
+      // Remove extension from title (e.g., .mp3, .m4b)
+      const cleanTitle = url.split('/').pop()?.split('?')[0].replace(/\.[^/.]+$/, "") || "Remote Stream";
+
       const newTrack: AudioTrack = {
         id: `track-${Date.now()}`,
-        title: url.split('/').pop()?.split('?')[0] || "Remote Stream",
-        filename: "Remote Stream", // No file object for remote streams
+        title: cleanTitle,
+        filename: "Remote Stream",
         url: url,
         category,
         bookmarks: [],
         subtitles: [],
         secondarySubtitles: []
       };
-      await saveTrackToDB(newTrack, null as any); // Pass null for file as it's a remote stream
+      
+      await saveTrackToDB(newTrack, null as any);
       setAudioTracks(prev => [...prev, newTrack]);
     } catch (err) {
       console.error("Failed to import link:", err);
@@ -318,12 +341,10 @@ const App: React.FC = () => {
     
     setIsOpeningTrack(true);
     try {
-      // Release old URL object if it exists
       if (trackToUpdate.url && trackToUpdate.file) {
         URL.revokeObjectURL(trackToUpdate.url);
       }
 
-      // Create new URL for the new file
       const newUrl = URL.createObjectURL(file);
       const { chapters, coverBlob } = await parseChapters(file);
 
@@ -331,7 +352,7 @@ const App: React.FC = () => {
         file,
         url: newUrl,
         filename: file.name,
-        title: file.name.replace(/\.[^/.]+$/, ''), // Update title based on new file name
+        title: file.name.replace(/\.[^/.]+$/, ''),
         chapters,
         coverBlob,
         cover: coverBlob ? URL.createObjectURL(coverBlob) : undefined,
@@ -340,11 +361,10 @@ const App: React.FC = () => {
       await updateTrackMetadataInDB(trackId, updates);
       setAudioTracks(prev => prev.map(t => t.id === trackId ? { ...t, ...updates } : t));
       
-      // If currently playing, update audio source and re-play
       if (currentTrackId === trackId && audioRef.current) {
         audioRef.current.src = newUrl;
-        audioRef.current.load(); // Reload the new audio
-        safePlay(); // Attempt to play automatically
+        audioRef.current.load();
+        safePlay();
       }
     } catch (err) {
       console.error("Failed to replace audio file:", err);
@@ -354,29 +374,54 @@ const App: React.FC = () => {
     }
   };
 
+  // New function to update URL for network tracks
+  const handleUpdateTrackUrl = async (trackId: string, newUrl: string) => {
+      const updates: Partial<AudioTrack> = {
+          url: newUrl,
+          title: newUrl.split('/').pop()?.split('?')[0].replace(/\.[^/.]+$/, "") || "Remote Stream", // Optional: update title if URL changes
+      };
+      await updateTrackMetadataInDB(trackId, updates);
+      setAudioTracks(prev => prev.map(t => t.id === trackId ? { ...t, ...updates } : t));
+      
+      if (currentTrackId === trackId && audioRef.current) {
+        audioRef.current.src = newUrl;
+        audioRef.current.load();
+        safePlay();
+      }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-slate-900 text-slate-200 font-sans select-none overflow-hidden">
-      <audio ref={audioRef} src={audioSrc || undefined} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(e) => {
-        setDuration(e.currentTarget.duration);
-        if (currentTrackId) updateTrackMetadataInDB(currentTrackId, {duration: e.currentTarget.duration});
-        // Check for pending seek
-        if (currentTrack?.lastPosition && audioRef.current && currentTrackId === currentTrack.id) {
-          audioRef.current.currentTime = currentTrack.lastPosition;
-        }
-        safePlay();
-      }} onEnded={() => {
-        setIsPlaying(false);
-        // Save last position for current track
-        if (currentTrackId && currentTrack) {
-          updateTrackMetadataInDB(currentTrackId, { lastPosition: 0 }); // Reset to 0 on end
-        }
-      }} className="hidden" />
+      <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
+      
+      {/* Audio Element with iOS specific attributes */}
+      <audio 
+        ref={audioRef} 
+        src={audioSrc || undefined} 
+        onTimeUpdate={handleTimeUpdate} 
+        onLoadedMetadata={(e) => {
+          setDuration(e.currentTarget.duration);
+          if (currentTrackId) updateTrackMetadataInDB(currentTrackId, {duration: e.currentTarget.duration});
+          if (currentTrack?.lastPosition && audioRef.current && currentTrackId === currentTrack.id) {
+            audioRef.current.currentTime = currentTrack.lastPosition;
+          }
+          safePlay();
+        }} 
+        onEnded={() => {
+          setIsPlaying(false);
+          if (currentTrackId && currentTrack) {
+            updateTrackMetadataInDB(currentTrackId, { lastPosition: 0 });
+          }
+        }} 
+        className="hidden" 
+        playsInline={true} // Important for iOS
+        crossOrigin={isIOS() ? undefined : "anonymous"} // iOS direct streams might fail with anonymous if not CORS enabled, undefined usually works better for simple playback
+      />
       
       <header className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700 shadow-sm z-50 h-16 shrink-0">
          <div className="flex items-center gap-4 flex-1 min-w-0">
             <button onClick={() => { 
               if (currentTrackId && currentTrack && audioRef.current) {
-                // Save last position before leaving player view
                 updateTrackMetadataInDB(currentTrackId, { lastPosition: audioRef.current.currentTime });
               }
               safePause(); 
@@ -387,7 +432,6 @@ const App: React.FC = () => {
          <div className="flex items-center gap-1">
             {view === 'player' && (
               <>
-                {/* Changed 't.addBookmarkQuick' to 't.addBookmark' */}
                 <button onClick={() => handleOpenBookmarkModal()} className="p-2 text-slate-400 hover:text-white" title={t.addBookmark}>
                     <i className="fa-solid fa-bookmark text-lg"></i>
                 </button>
@@ -422,7 +466,7 @@ const App: React.FC = () => {
              await updateTrackMetadataInDB(currentTrack.id, { bookmarks: updatedBookmarks });
              setAudioTracks(prev => prev.map(t => t.id === currentTrack.id ? { ...t, bookmarks: updatedBookmarks } : t));
            }} 
-           onEditBookmark={handleOpenBookmarkModal} // Pass the edit handler
+           onEditBookmark={handleOpenBookmarkModal}
            language={language} 
          />
          {view === 'library' ? (
@@ -432,7 +476,7 @@ const App: React.FC = () => {
              onTrackDelete={async (id)=>{ 
                await deleteTrackFromDB(id); 
                setAudioTracks(prev=>prev.filter(t=>t.id!==id)); 
-               if (currentTrackId === id) { // If deleting the currently playing track
+               if (currentTrackId === id) {
                   setAudioSrc(null);
                   setCurrentTrackId(null);
                   setFileName("No file loaded");
@@ -443,10 +487,11 @@ const App: React.FC = () => {
              onTrackUpdate={async (id, up) => { 
                await updateTrackMetadataInDB(id, up);
                setAudioTracks(prev => prev.map(t => t.id === id ? { ...t, ...up } : t));
-               if (currentTrackId === id && up.title) setFileName(up.title); // Update file name if current track
+               if (currentTrackId === id && up.title) setFileName(up.title);
              }} 
              onImport={handleImport} 
              onReplaceFile={handleReplaceFile} 
+             onUpdateTrackUrl={handleUpdateTrackUrl} // Pass new handler
              onImportLink={handleImportLink} 
              onImportSubtitle={handleImportSubtitle} 
              language={language} 
@@ -472,7 +517,7 @@ const App: React.FC = () => {
                 }} 
                 isScanning={isScanning} 
                 onWordClick={(word, line, index) => {
-                  setWasPlayingBeforeModal(isPlaying); // Store play state before pausing for dictionary
+                  setWasPlayingBeforeModal(isPlaying); 
                   safePause(); 
                   setDictionaryTargetWord(word); 
                   setDictionaryTargetIndex(index); 
@@ -480,7 +525,7 @@ const App: React.FC = () => {
                   setShowDictionaryModal(true);
                 }} 
                 onShiftTimeline={handleShiftTimeline}
-                subtitleMode={subtitleMode} // Pass subtitleMode to renderer
+                subtitleMode={subtitleMode}
                 {...{gameType, language, learningLanguage, fontSize: subtitleFontSize, segmentationMode}} 
               />
               <PlayerControls 
@@ -493,7 +538,6 @@ const App: React.FC = () => {
                 onForward={() => {
                   if (audioRef.current) {
                     if (activeSubtitleIndex === -1 && currentDisplaySubtitles.length > 0) {
-                      // If no subtitle is active but subtitles exist, jump to the first one
                       audioRef.current.currentTime = currentDisplaySubtitles[0].start;
                     } else if (activeSubtitleIndex !== -1 && activeSubtitleIndex < currentDisplaySubtitles.length - 1) {
                       const next = currentDisplaySubtitles[activeSubtitleIndex + 1];
@@ -505,15 +549,15 @@ const App: React.FC = () => {
                   if (activeSubtitleIndex !== -1 && activeSubtitleIndex > 0) {
                     const prev = currentDisplaySubtitles[activeSubtitleIndex - 1];
                     if (audioRef.current) audioRef.current.currentTime = prev.start;
-                  } else if (audioRef.current) { // If at the first subtitle or no active, rewind a bit
+                  } else if (audioRef.current) { 
                     audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 5);
                   }
                 }} 
                 onReplay={() => {
                   if (activeSubtitleIndex !== -1 && currentDisplaySubtitles[activeSubtitleIndex]) {
                     if (audioRef.current) audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex].start;
-                  } else if (audioRef.current) { // If no active subtitle, replay from current time
-                    audioRef.current.currentTime -= 3; // Rewind a few seconds
+                  } else if (audioRef.current) { 
+                    audioRef.current.currentTime -= 3; 
                   }
                 }} 
                 onRateChange={(r) => {
@@ -543,7 +587,7 @@ const App: React.FC = () => {
         isOpen={showDictionaryModal} 
         onClose={() => { 
           setShowDictionaryModal(false); 
-          if (wasPlayingBeforeModal) safePlay(); // Resume playback if it was playing before opening dictionary
+          if (wasPlayingBeforeModal) safePlay(); 
         }} 
         initialWord={dictionaryTargetWord} 
         initialSegmentIndex={dictionaryTargetIndex}
@@ -551,7 +595,7 @@ const App: React.FC = () => {
         contextLine={dictionaryContext} 
         language={language} 
         learningLanguage={learningLanguage} 
-        onAddToAnki={handleAddToAnki} // Note: This function signature was changed in App to accept sentence
+        onAddToAnki={handleAddToAnki} 
         isAddingToAnki={isAddingToAnki} 
         variant="sidebar" 
         audioRef={audioRef} 
@@ -562,7 +606,7 @@ const App: React.FC = () => {
 
       <BookmarkModal
         isOpen={showBookmarkModal}
-        onClose={handleCloseBookmarkModal} // Use new handler
+        onClose={handleCloseBookmarkModal} 
         currentTime={audioRef.current?.currentTime || 0}
         currentTrackTitle={currentTrack?.title || "Unknown Track"}
         onSave={handleSaveBookmark}
