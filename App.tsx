@@ -404,7 +404,8 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-slate-200 font-sans select-none overflow-hidden">
+    // Use h-[100dvh] for mobile browsers to handle dynamic address bars correctly
+    <div className="flex flex-col h-[100dvh] bg-slate-900 text-slate-200 font-sans select-none overflow-hidden">
       <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
       
       {/* Audio Element with iOS specific attributes */}

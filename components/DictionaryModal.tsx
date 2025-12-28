@@ -230,22 +230,18 @@ export const DictionaryModal: React.FC<Props> = ({
             return;
         }
 
-        // 检测环境
         const ua = navigator.userAgent;
-        // Generic Webview check: Android + wv (typical pattern)
-        const isAndroidWebView = /Android.*wv/i.test(ua); 
-        // Specific browser checks
-        const isKiwi = /Kiwi/i.test(ua);
+        // 检测 Via 浏览器
         const isVia = /Via/i.test(ua);
+        // 检测 iOS
         const isIOS = /iPad|iPhone|iPod|Macintosh/i.test(ua) && 'ontouchend' in document;
 
         // 决策逻辑: 
-        // 1. iOS: 必须切片 (captureStream 支持不佳)
-        // 2. Via: 必须切片 (用户报告无法录音)
-        // 3. Android WebView (非 Kiwi): 尝试切片
-        // 4. Kiwi: 使用录音 (用户明确要求保留原样)
-        // 5. Desktop/Chrome: 使用录音
-        const shouldUseSlicing = isIOS || isVia || (isAndroidWebView && !isKiwi);
+        // 1. Via 浏览器 (WebView): 强制使用切片，因为无法录音。
+        // 2. iOS: 强制使用切片，因为 captureStream 支持不佳。
+        // 3. Kiwi (Chromium): 保持使用录音 (不命中 if 条件)。
+        // 4. 其他浏览器: 默认使用录音，除非失败回退。
+        const shouldUseSlicing = (isVia || isIOS);
 
         // 如果判定需要切片且有本地文件，优先使用切片
         if (shouldUseSlicing && currentTrack?.file) {

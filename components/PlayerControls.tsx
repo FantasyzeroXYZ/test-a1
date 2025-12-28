@@ -59,8 +59,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const controlBtnClass = "text-slate-300 hover:text-white p-2 rounded-full hover:bg-slate-700 transition-all active:scale-90 flex items-center justify-center";
 
   return (
-    // Add pb-[calc(1.5rem+env(safe-area-inset-bottom))] to handle iPhone/iPad home bar and browser chrome overlap (like Kiwi)
-    <div className="bg-slate-800/90 backdrop-blur-md border-t border-slate-700 p-4 sticky bottom-0 z-50 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+    // Add significantly more bottom padding: pb-[calc(3rem+env(safe-area-inset-bottom))]
+    // This addresses the issue where the bottom of the player is cut off on iPad Safari (portrait) and Kiwi browser.
+    <div className="bg-slate-800/90 backdrop-blur-md border-t border-slate-700 p-4 sticky bottom-0 z-50 pb-[calc(3rem+env(safe-area-inset-bottom))]">
       {/* Progress Bar */}
       <div className="flex items-center gap-3 mb-4 text-xs font-mono text-slate-400">
         <span className="w-10 text-right">{formatTime(currentTime)}</span>
