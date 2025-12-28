@@ -231,44 +231,46 @@ export const DictionaryModal: React.FC<Props> = ({
         }
 
         const ua = navigator.userAgent;
-        // 检测 Via 浏览器
-        const isVia = /Via/i.test(ua);
-        // 检测 iOS
+        
+        // Comprehensive detection for generic Android WebViews (including Via)
+        // Standard Android WebView UAs usually contain 'Version/X.X' followed by 'Chrome/...'
+        // Via browser UA: "Mozilla/5.0 ... Android ... Via" or standard WebView signature.
+        const isGenericAndroidWebView = /Version\/\d+\.\d+/i.test(ua) && /Chrome\/\d+/i.test(ua) && /Android/i.test(ua);
+        const isExplicitVia = /Via/i.test(ua);
         const isIOS = /iPad|iPhone|iPod|Macintosh/i.test(ua) && 'ontouchend' in document;
 
-        // 决策逻辑: 
-        // 1. Via 浏览器 (WebView): 强制使用切片，因为无法录音。
-        // 2. iOS: 强制使用切片，因为 captureStream 支持不佳。
-        // 3. Kiwi (Chromium): 保持使用录音 (不命中 if 条件)。
-        // 4. 其他浏览器: 默认使用录音，除非失败回退。
-        const shouldUseSlicing = (isVia || isIOS);
+        // Kiwi Browser check (to EXCLUDE it from slicing logic)
+        const isKiwi = /Kiwi/i.test(ua);
 
-        // 如果判定需要切片且有本地文件，优先使用切片
-        if (shouldUseSlicing && currentTrack?.file) {
+        // Logic:
+        // 1. If it's Kiwi, use recording (captureStream), so isSlicingRequired = false.
+        // 2. If it's iOS, Via, or a Generic Android WebView, force slicing.
+        // 3. Otherwise (Standard Chrome/Firefox), use recording.
+        const isSlicingRequired = (isIOS || isExplicitVia || isGenericAndroidWebView) && !isKiwi;
+
+        if (isSlicingRequired && currentTrack?.file) {
             try {
-                // 直接切取本地文件，绕过 captureStream 限制
+                // Slicing: Directly cut audio from source file
                 const clipBase64 = await extractAudioClip(currentTrack.file, contextLine.start, contextLine.end);
                 resolve(clipBase64);
                 return;
             } catch (err) {
-                console.error("Local slice failed, falling back to recording if possible", err);
-                // Fallthrough to recorder logic
+                console.error("Local slice failed", err);
+                // Fallthrough to try recording as last resort
             }
         }
 
+        // Recording logic (Default or Fallback)
         try {
             audioChunksRef.current = [];
-            
-            // 1. Jump to start
             audioEl.currentTime = contextLine.start;
 
-            // 2. Get Capture Stream
             const stream = (audioEl as any).captureStream ? (audioEl as any).captureStream() : 
                            (audioEl as any).mozCaptureStream ? (audioEl as any).mozCaptureStream() : null;
 
             if (!stream) {
-                console.warn("Browser does not support captureStream");
-                // Last ditch attempt: if we have a file, try slicing even if we thought we should record
+                console.warn("captureStream not supported");
+                // Last ditch attempt at slicing if failed earlier or wasn't tried
                 if (currentTrack?.file) {
                      const clipBase64 = await extractAudioClip(currentTrack.file, contextLine.start, contextLine.end);
                      resolve(clipBase64);
@@ -280,13 +282,11 @@ export const DictionaryModal: React.FC<Props> = ({
 
             const audioTrack = stream.getAudioTracks()[0];
             if (!audioTrack) {
-                console.warn("No audio track in stream");
                 resolve(undefined);
                 return;
             }
             const mediaStream = new MediaStream([audioTrack]);
 
-            // 3. Setup Recorder
             let mimeType = 'audio/webm;codecs=opus';
             if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm';
             
@@ -306,11 +306,9 @@ export const DictionaryModal: React.FC<Props> = ({
                 reader.readAsDataURL(blob);
             };
 
-            // 4. Play and Record
             await audioEl.play();
             recorder.start(10); 
 
-            // 5. Watch for end
             const checkTime = () => {
                 if (audioEl.currentTime >= contextLine.end) {
                     if (recorder.state !== 'inactive') recorder.stop();
@@ -321,7 +319,7 @@ export const DictionaryModal: React.FC<Props> = ({
             audioEl.addEventListener('timeupdate', checkTime);
 
         } catch (err) {
-            console.error("Recording sequence failed", err);
+            console.error("Recording failed", err);
             resolve(undefined);
         }
     });

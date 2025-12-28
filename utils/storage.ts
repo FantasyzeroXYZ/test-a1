@@ -62,9 +62,21 @@ export const getAllTracksFromDB = async (): Promise<AudioTrack[]> => {
       const results = request.result.map(item => {
         const file = item.file as File;
         const coverBlob = item.coverBlob as Blob | undefined;
+        
+        let audioUrl = "";
+        if (file) {
+            // Fix for iOS M4B playback: Force correct MIME type
+            if (file.name.toLowerCase().endsWith('.m4b') || file.name.toLowerCase().endsWith('.m4a')) {
+                const fixedBlob = file.slice(0, file.size, 'audio/mp4');
+                audioUrl = URL.createObjectURL(fixedBlob);
+            } else {
+                audioUrl = URL.createObjectURL(file);
+            }
+        }
+
         return {
           ...item,
-          url: file ? URL.createObjectURL(file) : "", // 为当前会话重新生成音频 URL
+          url: audioUrl, // 为当前会话重新生成音频 URL
           cover: coverBlob ? URL.createObjectURL(coverBlob) : item.cover // 为当前会话重新生成封面 URL (如果 blob 存在)
         };
       });
