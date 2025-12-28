@@ -162,12 +162,25 @@ const App: React.FC = () => {
         setCurrentTime(curr);
     }
     
+    // AB Loop logic
     if (loopA !== null && loopB !== null && curr >= loopB) {
       audioRef.current.currentTime = loopA;
       return;
     }
 
     const newIdx = findSubtitleIndex(currentDisplaySubtitles, curr);
+
+    // Single Sentence Repeat logic
+    // Check if we passed the end of the current sentence
+    if (isSentenceRepeat && activeSubtitleIndex !== -1 && currentDisplaySubtitles.length > 0) {
+      const currentSub = currentDisplaySubtitles[activeSubtitleIndex];
+      // If we are strictly after the end of the subtitle, AND the index calculator says we should be elsewhere
+      if (curr > currentSub.end && newIdx !== activeSubtitleIndex) {
+         audioRef.current.currentTime = currentSub.start;
+         return; 
+      }
+    }
+
     if (newIdx !== -1 && newIdx !== activeSubtitleIndex) {
       setActiveSubtitleIndex(newIdx);
     } else if (newIdx === -1 && activeSubtitleIndex !== -1) {
@@ -537,11 +550,19 @@ const App: React.FC = () => {
                 onSeek={(t) => { if (audioRef.current) audioRef.current.currentTime = t; }} 
                 onForward={() => {
                   if (audioRef.current) {
+                    // Check if we are before the first subtitle and have subtitles
+                    if (currentDisplaySubtitles.length > 0 && currentTime < currentDisplaySubtitles[0].start) {
+                        audioRef.current.currentTime = currentDisplaySubtitles[0].start;
+                        return;
+                    }
+
                     if (activeSubtitleIndex === -1 && currentDisplaySubtitles.length > 0) {
                       audioRef.current.currentTime = currentDisplaySubtitles[0].start;
+                      setActiveSubtitleIndex(0); // Update index explicitly
                     } else if (activeSubtitleIndex !== -1 && activeSubtitleIndex < currentDisplaySubtitles.length - 1) {
                       const next = currentDisplaySubtitles[activeSubtitleIndex + 1];
                       audioRef.current.currentTime = next.start;
+                      setActiveSubtitleIndex(activeSubtitleIndex + 1); // Update index explicitly to avoid loop trap
                     }
                   }
                 }} 
@@ -549,6 +570,7 @@ const App: React.FC = () => {
                   if (activeSubtitleIndex !== -1 && activeSubtitleIndex > 0) {
                     const prev = currentDisplaySubtitles[activeSubtitleIndex - 1];
                     if (audioRef.current) audioRef.current.currentTime = prev.start;
+                    setActiveSubtitleIndex(activeSubtitleIndex - 1); // Update index explicitly
                   } else if (audioRef.current) { 
                     audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 5);
                   }
@@ -602,6 +624,7 @@ const App: React.FC = () => {
         hasAudioField={!!ankiSettings.fieldMap.audio} 
         segmentationMode={segmentationMode}
         webSearchEngine={webSearchEngine}
+        currentTrack={currentTrack} // Pass currentTrack for file slicing
       />
 
       <BookmarkModal

@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef, memo, useMemo, useCallback } from 'react';
-import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, SegmentationMode, DictionaryTab, WebSearchEngine } from '../types';
+import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, SegmentationMode, DictionaryTab, WebSearchEngine, AudioTrack } from '../types';
 import { getTranslation } from '../utils/i18n';
 import { segmentText, isWord, isNonSpacedLang } from '../utils/textUtils';
 import { lookupWord } from '../services/dictionaryService';
+import { extractAudioClip } from '../utils/audioUtils';
 
 // Define a common interface for icon props to allow className
 interface IconProps {
@@ -41,10 +42,11 @@ interface Props {
   hasAudioField: boolean;
   segmentationMode: SegmentationMode;
   webSearchEngine: WebSearchEngine; // 从设置传入
+  currentTrack?: AudioTrack; // 需要当前轨道信息来获取源文件
 }
 
 export const DictionaryModal: React.FC<Props> = ({ 
-  isOpen, onClose, initialWord, initialSegmentIndex, sentence, contextLine, language, learningLanguage, onAddToAnki, isAddingToAnki, variant = 'sidebar', audioRef, hasAudioField, segmentationMode, webSearchEngine
+  isOpen, onClose, initialWord, initialSegmentIndex, sentence, contextLine, language, learningLanguage, onAddToAnki, isAddingToAnki, variant = 'sidebar', audioRef, hasAudioField, segmentationMode, webSearchEngine, currentTrack
 }) => {
   const t = getTranslation(language);
   const [searchQuery, setSearchQuery] = useState('');
@@ -228,6 +230,36 @@ export const DictionaryModal: React.FC<Props> = ({
             return;
         }
 
+        // 检测环境
+        const ua = navigator.userAgent;
+        // Generic Webview check: Android + wv (typical pattern)
+        const isAndroidWebView = /Android.*wv/i.test(ua); 
+        // Specific browser checks
+        const isKiwi = /Kiwi/i.test(ua);
+        const isVia = /Via/i.test(ua);
+        const isIOS = /iPad|iPhone|iPod|Macintosh/i.test(ua) && 'ontouchend' in document;
+
+        // 决策逻辑: 
+        // 1. iOS: 必须切片 (captureStream 支持不佳)
+        // 2. Via: 必须切片 (用户报告无法录音)
+        // 3. Android WebView (非 Kiwi): 尝试切片
+        // 4. Kiwi: 使用录音 (用户明确要求保留原样)
+        // 5. Desktop/Chrome: 使用录音
+        const shouldUseSlicing = isIOS || isVia || (isAndroidWebView && !isKiwi);
+
+        // 如果判定需要切片且有本地文件，优先使用切片
+        if (shouldUseSlicing && currentTrack?.file) {
+            try {
+                // 直接切取本地文件，绕过 captureStream 限制
+                const clipBase64 = await extractAudioClip(currentTrack.file, contextLine.start, contextLine.end);
+                resolve(clipBase64);
+                return;
+            } catch (err) {
+                console.error("Local slice failed, falling back to recording if possible", err);
+                // Fallthrough to recorder logic
+            }
+        }
+
         try {
             audioChunksRef.current = [];
             
@@ -240,6 +272,12 @@ export const DictionaryModal: React.FC<Props> = ({
 
             if (!stream) {
                 console.warn("Browser does not support captureStream");
+                // Last ditch attempt: if we have a file, try slicing even if we thought we should record
+                if (currentTrack?.file) {
+                     const clipBase64 = await extractAudioClip(currentTrack.file, contextLine.start, contextLine.end);
+                     resolve(clipBase64);
+                     return;
+                }
                 resolve(undefined);
                 return;
             }
@@ -442,7 +480,7 @@ export const DictionaryModal: React.FC<Props> = ({
                   <div key={idx} className="bg-white/5 rounded-xl p-4 border border-white/5 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black uppercase tracking-widest text-pink-400 bg-pink-400/10 px-2 py-0.5 rounded border border-pink-500/20">{entry.partOfSpeech}</span>
-                      {entry.pronunciations?.[0]?.text && <span className="text-xs font-mono text-slate-400">/{entry.pronunciations[0].text}/</span>}
+                      {entry.pronunciations?.[0]?.text && <span className="text-xs text-slate-400" style={{ fontFamily: '"Lucida Sans Unicode", "Arial Unicode MS", sans-serif' }}>/{entry.pronunciations[0].text}/</span>}
                     </div>
                     {entry.senses?.map((sense, sIdx) => (
                       <div key={sIdx} className="space-y-2">

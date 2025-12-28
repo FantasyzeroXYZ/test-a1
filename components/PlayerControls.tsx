@@ -59,7 +59,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   const controlBtnClass = "text-slate-300 hover:text-white p-2 rounded-full hover:bg-slate-700 transition-all active:scale-90 flex items-center justify-center";
 
   return (
-    <div className="bg-slate-800/90 backdrop-blur-md border-t border-slate-700 p-4 sticky bottom-0 z-50">
+    // Add pb-[calc(1.5rem+env(safe-area-inset-bottom))] to handle iPhone/iPad home bar and browser chrome overlap (like Kiwi)
+    <div className="bg-slate-800/90 backdrop-blur-md border-t border-slate-700 p-4 sticky bottom-0 z-50 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
       {/* Progress Bar */}
       <div className="flex items-center gap-3 mb-4 text-xs font-mono text-slate-400">
         <span className="w-10 text-right">{formatTime(currentTime)}</span>
@@ -76,7 +77,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
       <div className="flex items-center justify-between gap-4">
         {/* Left Actions */}
-        <div className="flex items-center gap-2 w-32">
+        <div className="flex items-center gap-2 w-32 shrink-0">
           {hasSecondarySubtitles && (
             <button 
               onClick={onToggleSubtitleType} 
@@ -97,11 +98,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         {/* Center Playback Controls */}
-        <div className="flex items-center gap-2 md:gap-5">
+        <div className="flex items-center gap-2 md:gap-5 justify-center flex-1">
           {/* Sentence Repeat Button (Cycle Button) */}
           <button 
             onClick={onSentenceRepeatToggle} 
-            className={`w-10 h-10 relative flex items-center justify-center rounded-full transition-all active:scale-90 ${isSentenceRepeat ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-700 text-slate-400 hover:text-white'}`}
+            className={`w-10 h-10 relative flex items-center justify-center rounded-full transition-all active:scale-90 shrink-0 ${isSentenceRepeat ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-700 text-slate-400 hover:text-white'}`}
             title={t.replay}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -116,7 +117,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           </button>
 
           {/* Play/Pause */}
-          <button onClick={onPlayPause} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-full p-3 shadow-lg shadow-indigo-500/30 transition-all hover:scale-105 active:scale-95" title={t.keyPlayPause}>
+          <button onClick={onPlayPause} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-full p-3 shadow-lg shadow-indigo-500/30 transition-all hover:scale-105 active:scale-95 shrink-0" title={t.keyPlayPause}>
             {isPlaying ? (
               <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path fillRule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clipRule="evenodd" /></svg>
             ) : (
@@ -132,7 +133,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           {/* AB Loop Button */}
           <button 
             onClick={onABLoopToggle} 
-            className={`min-w-[44px] h-10 px-2 flex items-center justify-center text-xs font-bold rounded-full transition-all active:scale-90 ${loopA !== null ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-700 text-slate-400 hover:text-white'}`}
+            className={`min-w-[44px] h-10 px-2 flex items-center justify-center text-xs font-bold rounded-full transition-all active:scale-90 shrink-0 ${loopA !== null ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-700 text-slate-400 hover:text-white'}`}
             title={t.loop}
           >
             {abLabel}
@@ -140,7 +141,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         {/* Right Space */}
-        <div className="w-32"></div>
+        <div className="w-32 shrink-0"></div>
       </div>
     </div>
   );

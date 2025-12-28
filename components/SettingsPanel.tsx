@@ -32,15 +32,16 @@ interface SettingsPanelProps {
   setSpeechLang: (lang: string) => void;
   segmentationMode: SegmentationMode;
   setSegmentationMode: (mode: SegmentationMode) => void;
-  webSearchEngine: WebSearchEngine; // 新增
-  setWebSearchEngine: (engine: WebSearchEngine) => void; // 新增
+  webSearchEngine: WebSearchEngine;
+  setWebSearchEngine: (engine: WebSearchEngine) => void;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen, onClose, language, setLanguage, learningLanguage, setLearningLanguage, gameType, setGameType, playbackMode, setPlaybackMode, subtitleMode, setSubtitleMode, subtitleFontSize, setSubtitleFontSize, keyBindings, setKeyBindings, ankiSettings, setAnkiSettings, speechEnabled, setSpeechEnabled, speechLang, setSpeechLang, segmentationMode, setSegmentationMode, webSearchEngine, setWebSearchEngine
 }) => {
   const t = getTranslation(language);
-  const [openSection, setOpenSection] = useState<string | null>(null);
+  // Change to a Set to allow multiple sections to be open, default empty (all collapsed)
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
   const [ankiConnectionStatus, setAnkiConnectionStatus] = useState<'none'|'success'|'fail'>('none');
   const [ankiDecks, setAnkiDecks] = useState<string[]>([]);
   const [ankiModels, setAnkiModels] = useState<string[]>([]);
@@ -50,7 +51,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   if (!isOpen) return null;
 
   const toggleSection = (section: string) => {
-    setOpenSection(openSection === section ? null : section);
+    const newSections = new Set(openSections);
+    if (newSections.has(section)) {
+      newSections.delete(section);
+    } else {
+      newSections.add(section);
+    }
+    setOpenSections(newSections);
   };
 
   const startBinding = (key: keyof KeyBindings) => {
@@ -129,7 +136,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const SectionHeader = ({ id, title }: { id: string, title: string }) => (
     <button onClick={() => toggleSection(id)} className="w-full flex items-center justify-between p-4 bg-slate-700/50 hover:bg-slate-700 transition-colors border-b border-slate-700 last:border-0 text-left">
       <span className="text-xs uppercase font-bold text-slate-300 tracking-wider">{title}</span>
-      <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${openSection === id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${openSections.has(id) ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
     </button>
   );
 
@@ -144,7 +151,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="flex-1 overflow-y-auto pb-20">
           <div className="border-b border-slate-700/50">
             <SectionHeader id="general" title={t.general} />
-            {openSection === 'general' && (
+            {openSections.has('general') && (
               <div className="p-4 space-y-4 bg-slate-800/50">
                  <div>
                     <label className="block text-sm font-medium text-slate-400 mb-2">{t.language}</label>
@@ -175,7 +182,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="border-b border-slate-700/50">
             <SectionHeader id="interface" title={t.interface} />
-            {openSection === 'interface' && (
+            {openSections.has('interface') && (
               <div className="p-4 space-y-4 bg-slate-800/50">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">{t.subtitleMode}</label>
@@ -195,7 +202,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="border-b border-slate-700/50">
             <SectionHeader id="shortcuts" title={t.shortcuts} />
-            {openSection === 'shortcuts' && (
+            {openSections.has('shortcuts') && (
               <div className="p-4 bg-slate-800/50 space-y-3">
                 {[
                   { id: 'playPause', label: t.keyPlayPause },
@@ -227,7 +234,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="border-b border-slate-700/50">
             <SectionHeader id="anki" title={t.ankiSettings} />
-            {openSection === 'anki' && (
+            {openSections.has('anki') && (
                <div className="p-4 space-y-4 bg-slate-800/50">
                   <div className="flex gap-2">
                     <div className="flex-1"><label className="text-xs text-slate-400 block mb-1">{t.ankiHost}</label><input type="text" value={ankiSettings.host} onChange={(e) => setAnkiSettings({...ankiSettings, host: e.target.value})} className="w-full bg-slate-900 text-sm p-2 rounded border border-slate-600"/></div>
@@ -275,7 +282,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="border-b border-slate-700/50">
             <SectionHeader id="data" title={t.dataManagement} />
-            {openSection === 'data' && (
+            {openSections.has('data') && (
               <div className="p-4 space-y-3 bg-slate-800/50">
                  <button onClick={handleExportData} className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-xs font-bold transition-all">{t.exportData}</button>
                  <button onClick={handleClearCache} className="w-full py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl text-xs font-bold transition-all">{t.clearCache}</button>
