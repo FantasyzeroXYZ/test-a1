@@ -110,14 +110,11 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
 }) => {
   const t = getTranslation(language);
   const containerRef = useRef<HTMLDivElement>(null);
-  const fullListContainerRef = useRef<HTMLDivElement>(null);
-  const [showFullList, setShowFullList] = useState(false);
-  const [shiftValue, setShiftValue] = useState(0);
 
   const isLargeDataset = subtitles.length >= LARGE_DATASET_THRESHOLD;
 
   useEffect(() => {
-    if (activeSubtitleIndex === -1 || showFullList) return;
+    if (activeSubtitleIndex === -1) return;
 
     const targetContainer = containerRef.current;
     if (!targetContainer) return;
@@ -147,31 +144,21 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
             });
         }
     }
-  }, [activeSubtitleIndex, isLargeDataset, showFullList, subtitleMode]);
-
-  useEffect(() => {
-    if (showFullList && fullListContainerRef.current && activeSubtitleIndex !== -1) {
-      const activeElementInFullList = fullListContainerRef.current.children[activeSubtitleIndex] as HTMLElement;
-      if (activeElementInFullList) {
-        activeElementInFullList.scrollIntoView({ behavior: 'instant', block: 'center' });
-      }
-    }
-  }, [showFullList, activeSubtitleIndex]);
-
+  }, [activeSubtitleIndex, isLargeDataset, subtitleMode]);
 
   const visibleLines = useMemo(() => {
     if (subtitleMode === 'single') {
       return activeSubtitleIndex !== -1 ? [subtitles[activeSubtitleIndex]] : [];
     }
 
-    if (!isLargeDataset || showFullList) {
+    if (!isLargeDataset) {
       return subtitles;
     }
     
     const start = Math.max(0, activeSubtitleIndex - SLICE_RANGE);
     const end = Math.min(subtitles.length, activeSubtitleIndex + SLICE_RANGE + 1);
     return subtitles.slice(start, end);
-  }, [subtitles, activeSubtitleIndex, isLargeDataset, showFullList, subtitleMode]);
+  }, [subtitles, activeSubtitleIndex, isLargeDataset, subtitleMode]);
 
   if (subtitles.length === 0) {
     return (
@@ -187,27 +174,9 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
 
   return (
     <div className="flex-1 relative flex flex-col overflow-hidden transition-colors duration-300">
-      {/* Toolbar */}
-      <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm p-1.5 flex items-center justify-center gap-3 border-b border-gray-200 dark:border-white/5 shrink-0 z-20 transition-colors">
-        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{t.adjustTiming}</span>
-        <div className="flex items-center gap-1">
-          <input 
-            type="number" step="0.1" value={shiftValue} 
-            onChange={(e) => setShiftValue(parseFloat(e.target.value))}
-            className="w-14 bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] text-slate-800 dark:text-white"
-          />
-          <button onClick={() => onShiftTimeline(shiftValue)} className="px-2 py-0.5 bg-indigo-600 text-[9px] font-bold rounded hover:bg-indigo-500 text-white">{t.apply}</button>
-        </div>
-        {isLargeDataset && subtitleMode === 'scroll' && (
-          <button onClick={() => setShowFullList(true)} className="ml-2 w-7 h-7 flex items-center justify-center bg-gray-200 dark:bg-slate-700/50 rounded-full text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-white transition-colors" title={t.chapters}>
-            <i className="fa-solid fa-list-ul text-xs"></i>
-          </button>
-        )}
-      </div>
-
       <div 
         ref={containerRef}
-        className={`flex-1 p-4 md:p-6 space-y-2 md:space-y-3 no-scrollbar hardware-accelerated ${isLargeDataset && subtitleMode === 'scroll' && !showFullList ? 'overflow-hidden' : 'overflow-y-auto'} ${subtitleMode === 'single' ? 'flex items-center justify-center' : ''}`}
+        className={`flex-1 p-4 md:p-6 space-y-2 md:space-y-3 no-scrollbar hardware-accelerated ${isLargeDataset && subtitleMode === 'scroll' ? 'overflow-hidden' : 'overflow-y-auto'} ${subtitleMode === 'single' ? 'flex items-center justify-center' : ''}`}
       >
         {visibleLines.map((line) => (
           <SubtitleItem 
@@ -225,28 +194,6 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
         ))}
         <div className="h-64 shrink-0" />
       </div>
-
-      {/* Full List Overlay */}
-      {showFullList && (
-        <div className="fixed inset-0 z-[150] bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl flex flex-col animate-fade-in transition-colors">
-          <div className="p-4 border-b border-gray-200 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-slate-900">
-            <h3 className="font-black text-xs uppercase tracking-widest text-indigo-500 dark:text-indigo-400">{t.chapters}</h3>
-            <button onClick={() => setShowFullList(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors">✕</button>
-          </div>
-          <div ref={fullListContainerRef} className="flex-1 overflow-y-auto p-4 space-y-1 no-scrollbar">
-            {subtitles.map((line, idx) => (
-              <div 
-                key={line.id} 
-                onClick={() => { onSeek(line.start); setShowFullList(false); }}
-                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${idx === activeSubtitleIndex ? 'bg-indigo-600 text-white shadow-lg' : 'hover:bg-gray-100 dark:hover:bg-white/5 text-slate-500 dark:text-slate-400'}`}
-              >
-                <span className="text-[9px] opacity-50 font-mono w-12 shrink-0">{(line.start).toFixed(1)}s</span>
-                <span className="text-sm truncate">{line.text || `[${t.segmentPrefix} ${idx}]`}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 });

@@ -27,6 +27,7 @@ interface PlayerControlsProps {
   onSaveBookmark: () => void;
   ttsEnabled: boolean;
   onTTSToggle: () => void;
+  onToggleSidePanel: () => void; // New Prop
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -52,6 +53,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onSaveBookmark,
   ttsEnabled,
   onTTSToggle,
+  onToggleSidePanel
 }) => {
   const t = getTranslation(language);
   
@@ -81,8 +83,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       {/* Controls Grid */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         
-        {/* Left: Secondary options (Speed, Subs) */}
+        {/* Left: Sidebar, Speed, Subs */}
         <div className="flex items-center gap-2 justify-start min-w-0 overflow-x-auto no-scrollbar">
+          <button 
+             onClick={onToggleSidePanel}
+             className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-indigo-500 transition-colors"
+             title="Toggle Sidebar"
+          >
+             <i className="fa-solid fa-list-ul text-xs"></i>
+          </button>
+          
           <select 
             value={playbackRate} 
             onChange={(e) => onRateChange(Number(e.target.value))} 

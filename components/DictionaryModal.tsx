@@ -139,10 +139,14 @@ const DictionaryModal: React.FC<Props> = ({
 
   // Push new URL to history stack
   const navigateToUrl = (url: string) => {
-    const newHistory = webHistory.slice(0, webHistoryIndex + 1);
-    newHistory.push(url);
-    setWebHistory(newHistory);
-    setWebHistoryIndex(newHistory.length);
+      if (settings.webLinkMode === 'external') {
+          window.open(url, '_blank');
+      } else {
+        const newHistory = webHistory.slice(0, webHistoryIndex + 1);
+        newHistory.push(url);
+        setWebHistory(newHistory);
+        setWebHistoryIndex(newHistory.length);
+      }
   };
 
   const handleSearch = (term?: string) => {
@@ -155,8 +159,10 @@ const DictionaryModal: React.FC<Props> = ({
     // Update Web Tab if needed or reset history for new term
     const url = constructWebSearchUrl(currentWebEngine, actualTerm);
     // Reset history for new word
-    setWebHistory([url]);
-    setWebHistoryIndex(0);
+    if (settings.webLinkMode !== 'external') {
+      setWebHistory([url]);
+      setWebHistoryIndex(0);
+    }
   };
 
   const handleAppendSegment = useCallback(() => {
@@ -171,7 +177,7 @@ const DictionaryModal: React.FC<Props> = ({
     setSearchTerm(newTerm);
     setHighlightRange(prev => ({ ...prev, end: nextIdx }));
     handleSearch(newTerm);
-  }, [searchTerm, segments, highlightRange, effectiveLearningLang, activeTab, currentWebEngine]);
+  }, [searchTerm, segments, highlightRange, effectiveLearningLang, activeTab, currentWebEngine, settings.webLinkMode]);
 
   const handleCopyFullSentence = () => {
       setSearchTerm(sentence);
@@ -211,9 +217,6 @@ const DictionaryModal: React.FC<Props> = ({
     window.speechSynthesis.speak(utterance);
   };
 
-  // Generic function to add content to Anki.
-  // If contentOverride is provided, use that as definition (Granular add).
-  // Otherwise use the full current content (Legacy behavior).
   const handleAddToAnki = async (contentOverride?: string) => {
     if (activeTab === 'custom' && !customDef.trim()) {
         alert("请输入内容或导入图片/文件后再制卡");
@@ -273,6 +276,11 @@ const DictionaryModal: React.FC<Props> = ({
 
   const toggleClipboard = () => {
     setSettings({...settings, copyToClipboard: !settings.copyToClipboard});
+  };
+  
+  const toggleLinkMode = () => {
+      const newMode = settings.webLinkMode === 'inline' ? 'external' : 'inline';
+      setSettings({...settings, webLinkMode: newMode});
   };
 
   const renderWebOptions = () => {
@@ -376,21 +384,26 @@ const DictionaryModal: React.FC<Props> = ({
                     <div className="animate-fade-in space-y-6">
                       {data.entries.map((entry, i) => (
                         <div key={i}>
-                          <span className="inline-block px-2 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase rounded mb-3">{entry.partOfSpeech}</span>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                              <span className="inline-block px-2 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase rounded">{entry.partOfSpeech}</span>
+                              {entry.tags && entry.tags.map(tag => (
+                                  <span key={tag} className="inline-block px-2 py-0.5 bg-gray-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-[10px] rounded">{tag}</span>
+                              ))}
+                          </div>
                           <div className="space-y-4">
                             {entry.senses.map((s, j) => (
-                              <div key={j} className="pl-4 border-l-2 border-gray-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 group">
-                                <p className="leading-relaxed flex items-start gap-2">
-                                    <span className="flex-1">{s.definition}</span>
-                                    {/* Granular Add Button */}
-                                    <button 
-                                        onClick={() => handleAddToAnki(s.definition)} 
-                                        className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-indigo-500 transition-opacity"
-                                        title="Add only this definition to Anki"
-                                    >
-                                        <i className="fa-solid fa-plus-circle"></i>
-                                    </button>
+                              <div key={j} className="pl-4 border-l-2 border-gray-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 group relative">
+                                <p className="leading-relaxed pr-8">
+                                    {s.definition}
                                 </p>
+                                {/* Granular Add Button - Always visible as requested */}
+                                <button 
+                                    onClick={() => handleAddToAnki(s.definition)} 
+                                    className="absolute right-0 top-0 text-slate-400 hover:text-indigo-500 transition-colors"
+                                    title="Add only this definition to Anki"
+                                >
+                                    <i className="fa-solid fa-plus-circle"></i>
+                                </button>
                               </div>
                             ))}
                           </div>
@@ -413,8 +426,18 @@ const DictionaryModal: React.FC<Props> = ({
 
           {activeTab === 'web' && (
             <div className="h-full flex flex-col">
-              {/* Refactored Header: Single line flex layout */}
+              {/* Refactored Header: Swapped positions of Nav and Search */}
               <div className="p-2 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/30 transition-colors flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  {/* Navigation Buttons Group - Now on Left */}
+                  <div className="flex gap-0.5 shrink-0">
+                      <button onClick={handleWebBack} disabled={webHistoryIndex <= 0} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webBack}><i className="fa-solid fa-arrow-left text-[10px]"></i></button>
+                      <button onClick={handleWebForward} disabled={webHistoryIndex >= webHistory.length - 1} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webForward}><i className="fa-solid fa-arrow-right text-[10px]"></i></button>
+                      <button onClick={handleWebRefresh} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400" title={t.webRefresh}><i className="fa-solid fa-rotate-right text-[10px]"></i></button>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="h-4 w-px bg-gray-300 dark:bg-slate-700 shrink-0"></div>
+
                   {/* Dropdowns Group */}
                   <div className="flex gap-1 shrink-0">
                     <select 
@@ -441,21 +464,23 @@ const DictionaryModal: React.FC<Props> = ({
                     </select>
                   </div>
                   
-                  {/* Divider */}
-                  <div className="h-4 w-px bg-gray-300 dark:bg-slate-700 shrink-0"></div>
-
-                  {/* Navigation Buttons Group */}
-                  <div className="flex gap-0.5 shrink-0">
-                      <button onClick={handleWebBack} disabled={webHistoryIndex <= 0} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webBack}><i className="fa-solid fa-arrow-left text-[10px]"></i></button>
-                      <button onClick={handleWebForward} disabled={webHistoryIndex >= webHistory.length - 1} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webForward}><i className="fa-solid fa-arrow-right text-[10px]"></i></button>
-                      <button onClick={handleWebRefresh} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400" title={t.webRefresh}><i className="fa-solid fa-rotate-right text-[10px]"></i></button>
-                  </div>
+                  {/* Link Mode Toggle */}
+                  <button onClick={toggleLinkMode} className={`ml-auto w-7 h-7 flex items-center justify-center rounded shrink-0 ${settings.webLinkMode === 'external' ? 'text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10' : 'text-slate-400 hover:text-slate-600'}`} title={settings.webLinkMode === 'external' ? 'External Browser' : 'Embedded View'}>
+                      <i className={`fa-solid ${settings.webLinkMode === 'external' ? 'fa-up-right-from-square' : 'fa-window-maximize'} text-[10px]`}></i>
+                  </button>
 
                   {/* Edit Toggle */}
-                  <button onClick={() => setShowWebCustomDef(!showWebCustomDef)} className={`ml-auto w-7 h-7 flex items-center justify-center rounded shrink-0 ${showWebCustomDef ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}><i className="fa-solid fa-pen-to-square text-[10px]"></i></button>
+                  <button onClick={() => setShowWebCustomDef(!showWebCustomDef)} className={`w-7 h-7 flex items-center justify-center rounded shrink-0 ${showWebCustomDef ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}><i className="fa-solid fa-pen-to-square text-[10px]"></i></button>
               </div>
               
-              <iframe ref={iframeRef} src={currentWebUrl} className="flex-1 w-full border-0 bg-white" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" />
+              {settings.webLinkMode === 'external' ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4 bg-gray-50 dark:bg-slate-900">
+                      <i className="fa-solid fa-up-right-from-square text-4xl opacity-30"></i>
+                      <p className="text-xs">Opening in external browser...</p>
+                  </div>
+              ) : (
+                  <iframe ref={iframeRef} src={currentWebUrl} className="flex-1 w-full border-0 bg-white" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" />
+              )}
               
               {showWebCustomDef && (
                 <div className="p-3 border-t border-gray-200 dark:border-slate-700 bg-white/95 dark:bg-slate-800/95 absolute bottom-0 left-0 right-0 z-10 flex flex-col gap-2 shadow-[0_-5px_15px_rgba(0,0,0,0.1)]">

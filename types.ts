@@ -24,6 +24,7 @@ export interface DictionaryEntry {
   partOfSpeech: string;
   pronunciations: Pronunciation[];
   senses: Sense[];
+  tags?: string[]; // Added for Yomitan tags
 }
 
 export interface DictionaryResult {
@@ -95,6 +96,9 @@ export type GameType = 'none' | 'cloze' | 'dictation';
 export type PlaybackMode = 'normal' | 'pause-per-sentence';
 
 export type WebSearchEngine = 'google' | 'baidu' | 'baidu_baike' | 'bing' | 'bing_trans' | 'deepl' | 'youdao_trans' | 'wikipedia' | 'moegirl';
+export type WebLinkMode = 'inline' | 'external';
+
+export type InputSource = 'keyboard' | 'gamepad';
 
 export interface SceneKeybindings {
   library: Record<string, string>;
@@ -111,6 +115,7 @@ export interface ReaderSettings {
   segmentationMode: SegmentationMode;
   playbackMode: PlaybackMode;
   webSearchEngine: WebSearchEngine;
+  webLinkMode: WebLinkMode;
   copyToClipboard: boolean;
   ttsEnabled: boolean;
   ttsVoice: string;
@@ -118,4 +123,5 @@ export interface ReaderSettings {
   ttsPitch: number;
   ttsVolume: number;
   keybindings: SceneKeybindings;
+  inputSource: InputSource; // Added for gamepad/keyboard switching
 }

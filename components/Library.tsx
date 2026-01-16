@@ -150,6 +150,16 @@ export const Library: React.FC<LibraryProps> = ({
     }
   };
 
+  // Improved Import Handler for iOS compatibility
+  const handleImportWrapper = (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => {
+      // iOS sometimes returns empty type or generic type for audio files
+      // We rely on extension checking if type fails
+      const file = e.target.files?.[0];
+      if (file) {
+          onImport(e, category);
+      }
+  };
+
   const circleActionBtn = "w-7 h-7 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-all border border-gray-200 dark:border-white/10 shadow-lg active:scale-90 hover:scale-105";
 
   const TrackTypeBadge = ({ isFile }: { isFile: boolean }) => (
@@ -194,7 +204,8 @@ export const Library: React.FC<LibraryProps> = ({
              </button>
              <label className="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl shadow-xl shadow-indigo-600/20 cursor-pointer flex items-center justify-center transition-all active:scale-90">
                 <i className="fa-solid fa-plus text-xs"></i>
-                <input type="file" accept={SUPPORTED_AUDIO_TYPES} className="hidden" onChange={(e) => onImport(e, activeTab)} />
+                {/* Removed strict accept attribute for broader compatibility on mobile, validation happens in logic */}
+                <input type="file" className="hidden" onChange={(e) => handleImportWrapper(e, activeTab)} />
              </label>
          </div>
       </div>
@@ -410,7 +421,7 @@ export const Library: React.FC<LibraryProps> = ({
                           <label className="w-full py-2.5 bg-gray-200 dark:bg-slate-700 hover:bg-gray-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
                              <i className="fa-solid fa-rotate"></i>
                              重新关联音频文件
-                             <input type="file" accept={SUPPORTED_AUDIO_TYPES} className="hidden" onChange={handleFileReplace} />
+                             <input type="file" className="hidden" onChange={handleFileReplace} />
                           </label>
                        </div>
                    ) : (

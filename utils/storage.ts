@@ -2,7 +2,7 @@
 import { AudioTrack, DictionaryEntry, DictionaryResult } from '../types';
 
 const DB_NAME = 'LinguaFlowDB';
-const DB_VERSION = 3; // Upgraded for Dictionary Meta support
+const DB_VERSION = 4; // Upgraded for Tags support
 const STORE_NAME = 'tracks';
 const DICT_STORE_NAME = 'dictionary';
 const DICT_META_STORE_NAME = 'dictionary_meta';
@@ -20,6 +20,7 @@ export interface LocalDictEntry {
   term: string;
   reading?: string;
   definitions: string[];
+  tags?: string[]; // Added tags
   dictionaryId: string;
 }
 
@@ -290,6 +291,7 @@ export const searchLocalDictionary = async (term: string, currentScope: string):
         entries: filtered.map(item => ({
           partOfSpeech: dictMap.get(item.dictionaryId)?.name || 'Dictionary',
           pronunciations: item.reading ? [{ text: item.reading }] : [],
+          tags: item.tags || [],
           senses: [{
              definition: item.definitions.join('; '),
              examples: [],
