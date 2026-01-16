@@ -4,18 +4,6 @@ import { Bookmark, Language } from '../types';
 import { getTranslation } from '../utils/i18n';
 import { formatTime } from '../utils/parsers';
 
-const ColorPalette = memo(() => (
-  <div className="flex gap-2">
-    {['#6366f1', '#f97316', '#ef4444', '#22c55e', '#0ea5e9', '#a855f7', '#f43f5e', '#eab308', '#ec4899'].map(color => (
-      <div 
-        key={color} 
-        className="w-6 h-6 rounded-full cursor-pointer border border-white/20 hover:scale-110 transition-transform" 
-        style={{ backgroundColor: color }} 
-      />
-    ))}
-  </div>
-));
-
 interface BookmarkModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -67,29 +55,29 @@ export const BookmarkModal: React.FC<BookmarkModalProps> = ({
       {/* Overlay */}
       <div className="fixed inset-0 bg-black/40 z-[90]" onClick={onClose} />
       
-      {/* Centering Container (using Flexbox instead of transform to avoid animation conflict) */}
+      {/* Centering Container */}
       <div className="fixed inset-0 z-[100] flex items-center justify-center pointer-events-none p-4">
         {/* Modal Content */}
-        <div className="pointer-events-auto w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6 animate-bounce-in">
-          <h2 className="text-xl font-bold text-white mb-6">
+        <div className="pointer-events-auto w-full max-w-md bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-2xl shadow-2xl p-6 animate-bounce-in transition-colors">
+          <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-6">
             {initialBookmark ? t.editBookmark : t.saveBookmark}
           </h2>
 
           <div className="space-y-4 mb-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">{t.bookmarkTitle}</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">{t.bookmarkTitle}</label>
               <input
                 type="text"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2.5 px-3 text-white text-sm focus:border-indigo-500 outline-none"
+                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg py-2.5 px-3 text-slate-800 dark:text-white text-sm focus:border-indigo-500 outline-none transition-colors"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={`${currentTrackTitle} @ ${formatTime(currentTime)}`}
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">{t.bookmarkNotes}</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">{t.bookmarkNotes}</label>
               <textarea
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2.5 px-3 text-white text-sm focus:border-indigo-500 outline-none"
+                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg py-2.5 px-3 text-slate-800 dark:text-white text-sm focus:border-indigo-500 outline-none transition-colors"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={t.bookmarkNotes}
@@ -97,7 +85,7 @@ export const BookmarkModal: React.FC<BookmarkModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">{t.bookmarkColor}</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{t.bookmarkColor}</label>
               <div className="flex flex-wrap gap-2">
                 {['#6366f1', '#f97316', '#ef4444', '#22c55e', '#0ea5e9', '#a855f7', '#f43f5e', '#eab308', '#ec4899', '#94a3b8'].map(c => (
                   <div 
@@ -115,7 +103,7 @@ export const BookmarkModal: React.FC<BookmarkModalProps> = ({
           </div>
 
           <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 text-sm font-bold text-slate-400 hover:text-white rounded-lg transition-colors">
+            <button onClick={onClose} className="flex-1 py-3 text-sm font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg transition-colors">
               {t.cancel}
             </button>
             <button onClick={handleSave} className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg shadow-indigo-600/30 transition-colors">

@@ -1,7 +1,9 @@
 
-export type Language = 'en' | 'zh';
+export type Language = 'en' | 'zh' | 'zh-TW';
 
 export type LearningLanguage = 'en' | 'zh' | 'ja' | 'es' | 'ru' | 'fr';
+
+export type Theme = 'light' | 'dark';
 
 export interface Pronunciation {
   text: string;
@@ -38,6 +40,40 @@ export interface SubtitleLine {
   text: string;
 }
 
+export interface Chapter {
+  startTime: number;
+  title: string;
+}
+
+export interface Bookmark {
+  id: string;
+  time: number;
+  label: string;
+  notes?: string;
+  color?: string;
+  createdAt: number;
+}
+
+export interface AudioTrack {
+  id: string;
+  title: string;
+  filename?: string;
+  url: string;
+  category: 'music' | 'audiobook';
+  file?: File;
+  chapters?: Chapter[];
+  coverBlob?: Blob;
+  cover?: string;
+  subtitles?: SubtitleLine[];
+  subtitleFileName?: string;
+  secondarySubtitles?: SubtitleLine[];
+  secondarySubtitleFileName?: string;
+  bookmarks?: Bookmark[];
+  duration?: number;
+  updatedAt?: number;
+  language?: LearningLanguage; // Track specific language
+}
+
 export interface AnkiSettings {
   host: string;
   port: number;
@@ -53,52 +89,33 @@ export interface AnkiSettings {
   tags: string;
 }
 
-export type SubtitleMode = 'scroll' | 'single'; // 'scroll' (滚动列表) 或 'single' (仅当前行)
-export type SegmentationMode = 'browser' | 'mecab' | 'none'; // 新增 'none'
+export type SubtitleMode = 'scroll' | 'single';
+export type SegmentationMode = 'browser' | 'mecab' | 'none';
 export type GameType = 'none' | 'cloze' | 'dictation';
 export type PlaybackMode = 'normal' | 'pause-per-sentence';
 
-export type WebSearchEngine = 'google' | 'baidu' | 'baidu_baike' | 'bing';
-export type DictionaryTab = 'dictionary' | 'web' | 'userscript';
+export type WebSearchEngine = 'google' | 'baidu' | 'baidu_baike' | 'bing' | 'bing_trans' | 'deepl' | 'youdao_trans' | 'wikipedia' | 'moegirl';
 
-
-export interface Chapter {
-  title: string;
-  startTime: number;
+export interface SceneKeybindings {
+  library: Record<string, string>;
+  player: Record<string, string>;
+  dictionary: Record<string, string>;
 }
 
-export interface Bookmark {
-  id: string;
-  time: number;
-  label: string;
-  notes?: string; // 新增笔记字段
-  color?: string; // 新增颜色字段
-  createdAt: number;
-}
-
-export interface AudioTrack {
-  id: string;
-  title: string;
-  filename?: string;
-  url: string;
-  category: 'music' | 'audiobook';
-  duration?: number;
-  lastPosition?: number;
-  file?: File;
-  cover?: string;
-  coverBlob?: Blob;
-  chapters?: Chapter[];
-  bookmarks?: Bookmark[];
-  subtitles?: SubtitleLine[];
-  subtitleFileName?: string;
-  secondarySubtitles?: SubtitleLine[];
-  secondarySubtitleFileName?: string;
-}
-
-export interface KeyBindings {
-  playPause: string;
-  rewind: string;
-  forward: string;
-  toggleSidebar: string;
-  toggleSubtitleMode: string;
+export interface ReaderSettings {
+  theme: Theme;
+  language: Language;
+  learningLanguage: LearningLanguage;
+  subtitleMode: SubtitleMode;
+  subtitleFontSize: number;
+  segmentationMode: SegmentationMode;
+  playbackMode: PlaybackMode;
+  webSearchEngine: WebSearchEngine;
+  copyToClipboard: boolean;
+  ttsEnabled: boolean;
+  ttsVoice: string;
+  ttsRate: number;
+  ttsPitch: number;
+  ttsVolume: number;
+  keybindings: SceneKeybindings;
 }

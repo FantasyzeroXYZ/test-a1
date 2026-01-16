@@ -1,23 +1,64 @@
 
-import { AudioTrack } from '../types';
+import { AudioTrack, DictionaryEntry, DictionaryResult } from '../types';
 
 const DB_NAME = 'LinguaFlowDB';
-const DB_VERSION = 1;
+const DB_VERSION = 3; // Upgraded for Dictionary Meta support
 const STORE_NAME = 'tracks';
+const DICT_STORE_NAME = 'dictionary';
+const DICT_META_STORE_NAME = 'dictionary_meta';
+
+export interface DictionaryMeta {
+  id: string;
+  name: string;
+  scope: string; // 'universal' or specific language code
+  count: number;
+  priority: number; // Lower value = higher priority (appears first)
+  importedAt: number;
+}
+
+export interface LocalDictEntry {
+  term: string;
+  reading?: string;
+  definitions: string[];
+  dictionaryId: string;
+}
 
 export const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const transaction = request.transaction;
+      
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
+      
+      let dictStore;
+      if (!db.objectStoreNames.contains(DICT_STORE_NAME)) {
+        dictStore = db.createObjectStore(DICT_STORE_NAME, { autoIncrement: true });
+        dictStore.createIndex('term', 'term', { unique: false });
+      } else {
+        dictStore = transaction?.objectStore(DICT_STORE_NAME);
+      }
+      
+      // V3: Add dictionaryId index if not exists
+      if (dictStore && !dictStore.indexNames.contains('dictionaryId')) {
+          dictStore.createIndex('dictionaryId', 'dictionaryId', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(DICT_META_STORE_NAME)) {
+        db.createObjectStore(DICT_META_STORE_NAME, { keyPath: 'id' });
+      }
     };
+    
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 };
+
+// --- Track Functions ---
 
 export const saveTrackToDB = async (track: AudioTrack, file: File) => {
   const db = await initDB();
@@ -25,8 +66,6 @@ export const saveTrackToDB = async (track: AudioTrack, file: File) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     
-    // 移除无法序列化的临时 URL (包括音频 URL 和封面 URL 字符串)
-    // coverBlob 会被保留并存入 IndexedDB
     const { url, cover, ...trackData } = track;
     
     const request = store.put({
@@ -65,8 +104,8 @@ export const getAllTracksFromDB = async (): Promise<AudioTrack[]> => {
         
         let audioUrl = "";
         if (file) {
-            // Fix for iOS M4B playback: Force correct MIME type
-            if (file.name.toLowerCase().endsWith('.m4b') || file.name.toLowerCase().endsWith('.m4a')) {
+            const name = file.name.toLowerCase();
+            if (name.endsWith('.m4b') || name.endsWith('.m4a') || file.type === 'audio/x-m4b') {
                 const fixedBlob = file.slice(0, file.size, 'audio/mp4');
                 audioUrl = URL.createObjectURL(fixedBlob);
             } else {
@@ -76,8 +115,8 @@ export const getAllTracksFromDB = async (): Promise<AudioTrack[]> => {
 
         return {
           ...item,
-          url: audioUrl, // 为当前会话重新生成音频 URL
-          cover: coverBlob ? URL.createObjectURL(coverBlob) : item.cover // 为当前会话重新生成封面 URL (如果 blob 存在)
+          url: audioUrl,
+          cover: coverBlob ? URL.createObjectURL(coverBlob) : item.cover
         };
       });
       resolve(results);
@@ -96,18 +135,11 @@ export const updateTrackMetadataInDB = async (id: string, updates: Partial<Audio
     getRequest.onsuccess = () => {
       const data = getRequest.result;
       if (data) {
-        // 如果更新包含新的 URL，移除它们以免存入 DB
         const { url, cover, ...cleanUpdates } = updates;
-        
-        // 如果 updates 里有 coverBlob，它会被 merge 进去
-        // 如果 updates 里有 cover 字符串但没有 blob (不太可能在当前逻辑下), 我们忽略字符串更新以防覆盖 blob
-        
         const finalData = { ...data, ...cleanUpdates, updatedAt: Date.now() };
-        // 显式确保如果 updates 有 coverBlob，它被保存
         if (updates.coverBlob) {
             finalData.coverBlob = updates.coverBlob;
         }
-
         store.put(finalData);
       }
       resolve();
@@ -119,10 +151,155 @@ export const updateTrackMetadataInDB = async (id: string, updates: Partial<Audio
 export const clearAllDataFromDB = async () => {
   const db = await initDB();
   return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.clear();
-    request.onsuccess = () => resolve();
+    const transaction = db.transaction([STORE_NAME, DICT_STORE_NAME, DICT_META_STORE_NAME], 'readwrite');
+    transaction.objectStore(STORE_NAME).clear();
+    transaction.objectStore(DICT_STORE_NAME).clear();
+    transaction.objectStore(DICT_META_STORE_NAME).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+// --- Dictionary Management Functions ---
+
+export const saveDictionaryMeta = async (meta: DictionaryMeta) => {
+  const db = await initDB();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DICT_META_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(DICT_META_STORE_NAME);
+    store.put(meta);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+export const getDictionaries = async (): Promise<DictionaryMeta[]> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(DICT_META_STORE_NAME, 'readonly');
+    const store = transaction.objectStore(DICT_META_STORE_NAME);
+    const request = store.getAll();
+    request.onsuccess = () => {
+        // Sort by priority (asc)
+        const sorted = (request.result || []).sort((a: DictionaryMeta, b: DictionaryMeta) => a.priority - b.priority);
+        resolve(sorted);
+    };
+    request.onerror = () => reject(request.error);
+  });
+};
+
+export const deleteDictionary = async (id: string) => {
+  const db = await initDB();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction([DICT_STORE_NAME, DICT_META_STORE_NAME], 'readwrite');
+    
+    // Delete Meta
+    transaction.objectStore(DICT_META_STORE_NAME).delete(id);
+
+    // Delete Entries
+    const entryStore = transaction.objectStore(DICT_STORE_NAME);
+    const index = entryStore.index('dictionaryId');
+    const range = IDBKeyRange.only(id);
+    const cursorReq = index.openCursor(range);
+    
+    cursorReq.onsuccess = (e) => {
+        const cursor = (e.target as IDBRequest).result;
+        if (cursor) {
+            cursor.delete();
+            cursor.continue();
+        }
+    };
+
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+export const updateDictionary = async (id: string, updates: Partial<DictionaryMeta>) => {
+    const db = await initDB();
+    return new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(DICT_META_STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(DICT_META_STORE_NAME);
+        const getReq = store.get(id);
+        getReq.onsuccess = () => {
+            if (getReq.result) {
+                store.put({ ...getReq.result, ...updates });
+            }
+        };
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+    });
+};
+
+// --- Dictionary Entry Functions ---
+
+export const saveDictionaryBatch = async (entries: LocalDictEntry[]) => {
+  const db = await initDB();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(DICT_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(DICT_STORE_NAME);
+    
+    entries.forEach(entry => {
+      store.put(entry);
+    });
+    
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+export const searchLocalDictionary = async (term: string, currentScope: string): Promise<DictionaryResult | null> => {
+  const db = await initDB();
+  
+  // 1. Get all active dictionaries metadata
+  const dictionaries = await getDictionaries();
+  if (dictionaries.length === 0) return null;
+
+  // 2. Filter dictionaries by scope
+  const activeDicts = dictionaries.filter(d => d.scope === 'universal' || d.scope === currentScope);
+  const activeDictIds = new Set(activeDicts.map(d => d.id));
+  const dictMap = new Map(activeDicts.map(d => [d.id, d]));
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(DICT_STORE_NAME, 'readonly');
+    const store = transaction.objectStore(DICT_STORE_NAME);
+    const index = store.index('term');
+    const request = index.getAll(term);
+    
+    request.onsuccess = () => {
+      const rawResults: LocalDictEntry[] = request.result || [];
+      
+      // 3. Filter entries by active dictionary IDs
+      const filtered = rawResults.filter(r => r.dictionaryId && activeDictIds.has(r.dictionaryId));
+      
+      if (filtered.length === 0) {
+        resolve(null);
+        return;
+      }
+      
+      // 4. Sort entries based on dictionary priority
+      filtered.sort((a, b) => {
+          const pA = dictMap.get(a.dictionaryId)?.priority || 9999;
+          const pB = dictMap.get(b.dictionaryId)?.priority || 9999;
+          return pA - pB;
+      });
+      
+      // Map to standardized DictionaryResult format
+      const mappedResult: DictionaryResult = {
+        word: term,
+        entries: filtered.map(item => ({
+          partOfSpeech: dictMap.get(item.dictionaryId)?.name || 'Dictionary',
+          pronunciations: item.reading ? [{ text: item.reading }] : [],
+          senses: [{
+             definition: item.definitions.join('; '),
+             examples: [],
+             subsenses: []
+          }]
+        }))
+      };
+      
+      resolve(mappedResult);
+    };
     request.onerror = () => reject(request.error);
   });
 };

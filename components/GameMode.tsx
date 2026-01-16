@@ -60,11 +60,11 @@ export const GameMode: React.FC<GameModeProps> = ({
   return (
     // Moved to top-20 (just below header) so keyboard doesn't cover subtitles
     <div className="fixed top-20 left-0 right-0 flex justify-center z-40 pointer-events-none px-4">
-      <div className="bg-slate-900/90 backdrop-blur-md border border-indigo-500/50 rounded-xl p-3 shadow-2xl pointer-events-auto flex flex-col items-center gap-2 animate-bounce-in w-full max-w-md">
+      <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-indigo-500/50 rounded-xl p-3 shadow-2xl pointer-events-auto flex flex-col items-center gap-2 animate-bounce-in w-full max-w-md transition-colors">
          
          <div className="flex items-center gap-2">
             <span className={`w-1.5 h-1.5 rounded-full ${isCorrect ? 'bg-green-500' : 'bg-indigo-500'} animate-pulse`}></span>
-            <span className="text-[10px] text-indigo-300 uppercase font-bold tracking-widest">
+            <span className="text-[10px] text-indigo-600 dark:text-indigo-300 uppercase font-bold tracking-widest">
               {gameType === 'cloze' ? t.clozeMode : t.gameDictation}
             </span>
          </div>
@@ -76,11 +76,10 @@ export const GameMode: React.FC<GameModeProps> = ({
              value={userInput}
              onChange={(e) => onInputChange(e.target.value)}
              onKeyDown={handleKeyDown}
-             // Removed verbose placeholder, made text smaller, padding smaller
              className={`
-               w-full bg-slate-800 text-white text-base font-bold py-2 px-4 rounded-lg border-2 focus:outline-none transition-all text-center
+               w-full bg-gray-100 dark:bg-slate-800 text-slate-900 dark:text-white text-base font-bold py-2 px-4 rounded-lg border-2 focus:outline-none transition-all text-center
                ${isCorrect 
-                  ? 'border-green-500 bg-green-900/20' 
+                  ? 'border-green-500 bg-green-100 dark:bg-green-900/20' 
                   : 'border-indigo-500 focus:border-indigo-400'
                }
              `}
@@ -98,7 +97,7 @@ export const GameMode: React.FC<GameModeProps> = ({
            )}
          </div>
          
-         {isCorrect && <p className="text-green-400 text-[10px] font-bold animate-pulse">PRESS ENTER</p>}
+         {isCorrect && <p className="text-green-600 dark:text-green-400 text-[10px] font-bold animate-pulse">PRESS ENTER</p>}
       </div>
     </div>
   );

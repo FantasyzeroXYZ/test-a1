@@ -25,6 +25,8 @@ interface PlayerControlsProps {
   onToggleSubtitleType: () => void;
   activeSubtitleType: 'primary' | 'secondary';
   onSaveBookmark: () => void;
+  ttsEnabled: boolean;
+  onTTSToggle: () => void;
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -48,6 +50,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onToggleSubtitleType,
   activeSubtitleType,
   onSaveBookmark,
+  ttsEnabled,
+  onTTSToggle,
 }) => {
   const t = getTranslation(language);
   
@@ -55,17 +59,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   if (loopA !== null && loopB === null) abLabel = "A-";
   else if (loopA !== null && loopB !== null) abLabel = "A-B";
 
-  const controlBtnClass = "text-slate-300 hover:text-white p-2 rounded-full hover:bg-slate-700 transition-all active:scale-90 flex items-center justify-center";
+  const controlBtnClass = "text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white p-2 rounded-full hover:bg-gray-200 dark:hover:bg-slate-700 transition-all active:scale-90 flex items-center justify-center";
 
   return (
-    // Responsive bottom padding:
-    // Standard: p-3 or p-4
-    // Bottom Safe Area: env(safe-area-inset-bottom)
-    // Fixed height issues by reducing arbitrary rem padding.
-    <div className="bg-slate-800/95 backdrop-blur-xl border-t border-slate-700 w-full sticky bottom-0 z-50 pt-2 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-2xl">
+    <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border-t border-gray-200 dark:border-slate-700 w-full sticky bottom-0 z-50 pt-2 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-2xl transition-colors duration-300">
       
       {/* Progress Bar Row */}
-      <div className="flex items-center gap-3 mb-2 text-[10px] md:text-xs font-mono text-slate-400">
+      <div className="flex items-center gap-3 mb-2 text-[10px] md:text-xs font-mono text-slate-500 dark:text-slate-400">
         <span className="w-8 md:w-10 text-right">{formatTime(currentTime)}</span>
         <input
           type="range"
@@ -73,12 +73,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           max={duration || 100}
           value={currentTime}
           onChange={(e) => onSeek(Number(e.target.value))}
-          className="flex-grow h-1.5 md:h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400 transition-all"
+          className="flex-grow h-1.5 md:h-2 bg-gray-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-600 hover:accent-indigo-500 transition-all"
         />
         <span className="w-8 md:w-10">{formatTime(duration)}</span>
       </div>
 
-      {/* Controls Grid - Adapts to 3 columns: Left (Options), Center (Playback), Right (Loop) */}
+      {/* Controls Grid */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         
         {/* Left: Secondary options (Speed, Subs) */}
@@ -86,7 +86,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <select 
             value={playbackRate} 
             onChange={(e) => onRateChange(Number(e.target.value))} 
-            className="bg-slate-700/50 hover:bg-slate-600 text-white text-[10px] md:text-xs font-bold py-1.5 px-2 rounded-lg border border-slate-600 outline-none cursor-pointer transition-colors"
+            className="bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white text-[10px] md:text-xs font-bold py-1.5 px-2 rounded-lg border border-gray-300 dark:border-slate-600 outline-none cursor-pointer transition-colors"
             title={t.playbackMode}
           >
               {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => <option key={rate} value={rate}>{rate}x</option>)}
@@ -95,7 +95,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           {hasSecondarySubtitles && (
             <button 
               onClick={onToggleSubtitleType} 
-              className={`text-[10px] md:text-xs font-bold px-2 py-1.5 rounded-lg border transition-colors ${activeSubtitleType === 'secondary' ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-slate-600 text-slate-400 hover:text-white bg-slate-700/30'}`}
+              className={`text-[10px] md:text-xs font-bold px-2 py-1.5 rounded-lg border transition-colors ${activeSubtitleType === 'secondary' ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-gray-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-gray-100 dark:bg-slate-700/30'}`}
               title={activeSubtitleType === 'secondary' ? t.hasTrans : t.hasSubs}
             >
               {activeSubtitleType === 'secondary' ? 'TR' : 'SUB'}
@@ -108,13 +108,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           {/* Sentence Repeat */}
           <button 
             onClick={onSentenceRepeatToggle} 
-            className={`w-8 h-8 md:w-10 md:h-10 relative flex items-center justify-center rounded-full transition-all active:scale-90 ${isSentenceRepeat ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`w-8 h-8 md:w-10 md:h-10 relative flex items-center justify-center rounded-full transition-all active:scale-90 ${isSentenceRepeat ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 dark:text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'}`}
             title={t.replay}
           >
             <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            {isSentenceRepeat && <span className="absolute text-[8px] font-bold bottom-0 right-0 md:bottom-1 md:right-1 bg-slate-900 rounded-full w-3 h-3 flex items-center justify-center">1</span>}
+            {isSentenceRepeat && <span className="absolute text-[8px] font-bold bottom-0 right-0 md:bottom-1 md:right-1 bg-white dark:bg-slate-900 text-indigo-600 dark:text-white rounded-full w-3 h-3 flex items-center justify-center shadow">1</span>}
           </button>
 
           {/* Prev */}
@@ -141,7 +141,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <div className="flex items-center gap-2 justify-end">
           <button 
             onClick={onABLoopToggle} 
-            className={`h-8 md:h-9 px-3 rounded-lg text-[10px] md:text-xs font-bold transition-all border ${loopA !== null ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-slate-600 text-slate-400 hover:text-white bg-slate-700/30'}`}
+            className={`h-8 md:h-9 px-3 rounded-lg text-[10px] md:text-xs font-bold transition-all border ${loopA !== null ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-gray-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-gray-100 dark:bg-slate-700/30'}`}
             title={t.loop}
           >
             {abLabel}
