@@ -65,6 +65,7 @@ export const addNote = async (
     sentence: string;
     translation: string;
     audioBase64?: string;
+    examVocab?: string; // Added Exam Vocabulary data
   }
 ) => {
   const fields: Record<string, string> = {};
@@ -74,6 +75,7 @@ export const addNote = async (
   if (settings.fieldMap.definition) fields[settings.fieldMap.definition] = data.definition;
   if (settings.fieldMap.sentence) fields[settings.fieldMap.sentence] = data.sentence;
   if (settings.fieldMap.translation) fields[settings.fieldMap.translation] = data.translation;
+  if (settings.fieldMap.examVocab) fields[settings.fieldMap.examVocab] = data.examVocab || '';
   
   // If we have audio, store it first to get the correct filename
   if (data.audioBase64 && settings.fieldMap.audio) {

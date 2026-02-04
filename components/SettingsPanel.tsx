@@ -31,12 +31,13 @@ interface SettingsPanelProps {
 }
 
 type WebSearchCategory = 'search' | 'translate' | 'encyclopedia';
+type DictImportType = 'definition' | 'tag';
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen, onClose, language, setLanguage, learningLanguage, setLearningLanguage, subtitleMode, setSubtitleMode, subtitleFontSize, setSubtitleFontSize, readerSettings, setReaderSettings, ankiSettings, setAnkiSettings, segmentationMode, setSegmentationMode, webSearchEngine, setWebSearchEngine
 }) => {
   const t = getTranslation(language);
-  const [openSections, setOpenSections] = useState<Set<string>>(new Set(['general']));
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set()); // Default collapsed
   const [shortcutScene, setShortcutScene] = useState<keyof SceneKeybindings>('player');
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [ttsTestText, setTTSTestText] = useState('');
@@ -49,6 +50,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [ankiModels, setAnkiModels] = useState<string[]>([]);
   const [ankiFields, setAnkiFields] = useState<string[]>([]);
   const [ankiConnected, setAnkiConnected] = useState(false);
+  const [ankiConfigMode, setAnkiConfigMode] = useState<'word' | 'sentence'>('word');
+
+  // Dictionary Management State
+  const [viewDictType, setViewDictType] = useState<DictImportType>('definition');
+  const [viewDictLang, setViewDictLang] = useState<string>('all'); // New Language Filter
 
   // Keybinding State
   const [isKeyBindingActive, setIsKeyBindingActive] = useState(false);
@@ -57,6 +63,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Dictionary Import State
   const [dictImportScope, setDictImportScope] = useState<LearningLanguage | 'universal'>('universal');
+  const [dictImportType, setDictImportType] = useState<DictImportType>('definition');
   
   // Web Search Local State
   const [searchCategory, setSearchCategory] = useState<WebSearchCategory>('translate');
@@ -143,27 +150,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleKeybindKeyDown = (e: KeyboardEvent) => {
       if (!isKeyBindingActive || !bindingKeyTarget) return;
+      // Allow Escape to cancel binding
+      if (e.code === 'Escape') {
+          e.preventDefault();
+          setBindingKeyTarget(null);
+          return;
+      }
       e.preventDefault();
       e.stopPropagation();
 
-      // If in keyboard mode, capture key
-      if (readerSettings.inputSource === 'keyboard') {
-          const code = e.code;
-          updateTempBinding(bindingKeyTarget, code);
-          setBindingKeyTarget(null);
-      }
-  };
-
-  const handleGamepadButton = (e: GamepadEvent) => {
-      if (!isKeyBindingActive || !bindingKeyTarget) return;
-      if (readerSettings.inputSource === 'gamepad') {
-           // Basic mapping of button index to string
-           const buttonIndex = e.gamepad.buttons.findIndex(b => b.pressed);
-           if (buttonIndex !== -1) {
-               updateTempBinding(bindingKeyTarget, `Gamepad_${buttonIndex}`);
-               setBindingKeyTarget(null);
-           }
-      }
+      const code = e.code;
+      updateTempBinding(bindingKeyTarget, code);
+      setBindingKeyTarget(null);
   };
 
   useEffect(() => {
@@ -171,18 +169,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           window.addEventListener('keydown', handleKeybindKeyDown, { capture: true }); // Capture to prevent app actions
           return () => window.removeEventListener('keydown', handleKeybindKeyDown, { capture: true });
       }
-  }, [isKeyBindingActive, bindingKeyTarget, readerSettings.inputSource]);
+  }, [isKeyBindingActive, bindingKeyTarget]);
 
   const startBindingAction = (scene: string, action: string) => {
-      if (readerSettings.inputSource === 'gamepad') {
-           const handler = (e: KeyboardEvent) => {
-             e.preventDefault(); e.stopPropagation();
-             updateTempBinding(`${scene}-${action}`, e.code); 
-             setBindingKeyTarget(null);
-             window.removeEventListener('keydown', handler, { capture: true });
-           };
-           window.addEventListener('keydown', handler, { capture: true });
-      }
       setBindingKeyTarget(`${scene}-${action}`);
   };
 
@@ -248,9 +237,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         const batchSize = 2000;
         let totalCount = 0;
         
-        // Iterate through files
-        const files = Object.keys(zip.files).filter(f => f.includes('term_bank') && f.endsWith('.json'));
+        // Define file pattern based on type
+        // Definition: term_bank_*.json
+        // Tag: term_meta_bank_*.json
+        const filePattern = dictImportType === 'definition' ? 'term_bank' : 'term_meta_bank';
         
+        // Iterate through files
+        const files = Object.keys(zip.files).filter(f => f.includes(filePattern) && f.endsWith('.json'));
+        
+        if (files.length === 0) {
+            alert(`No ${filePattern} files found. Please check dictionary type selection.`);
+            setIsImportingDict(false);
+            setImportProgress('');
+            return;
+        }
+
         for (let i = 0; i < files.length; i++) {
             setImportProgress(`Parsing bank ${i + 1}/${files.length}...`);
             const fileName = files[i];
@@ -258,31 +259,62 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             const data = JSON.parse(content);
             
             // Yomitan term bank format: [term, reading, definition_tags, rules, score, [glossary], sequence, term_tags]
+            // Yomitan meta bank format: [term, mode, data]
+            
             for (const item of data) {
                 if (!Array.isArray(item)) continue;
                 
-                const term = item[0];
-                const reading = item[1];
-                const glossary = item[5]; // can be array of strings or objects
-                const tagsData = item[7] || ''; // term_tags is at index 7, typically space separated string or empty
-                const tags = typeof tagsData === 'string' && tagsData ? tagsData.split(' ') : [];
-                
-                let definitions: string[] = [];
-                if (Array.isArray(glossary)) {
-                    definitions = glossary.map((g: any) => {
-                        if (typeof g === 'string') return g;
-                        if (g && g.content && typeof g.content === 'string') return g.content;
-                        return JSON.stringify(g);
+                if (dictImportType === 'definition') {
+                    const term = item[0];
+                    const reading = item[1];
+                    const glossary = item[5]; // can be array of strings or objects
+                    const tagsData = item[7] || ''; // term_tags is at index 7, typically space separated string or empty
+                    const tags = typeof tagsData === 'string' && tagsData ? tagsData.split(' ') : [];
+                    
+                    let definitions: string[] = [];
+                    if (Array.isArray(glossary)) {
+                        definitions = glossary.map((g: any) => {
+                            if (typeof g === 'string') return g;
+                            if (g && g.content) return JSON.stringify(g); // Structured content
+                            return JSON.stringify(g);
+                        });
+                    }
+                    
+                    entries.push({
+                        term,
+                        reading,
+                        definitions,
+                        tags, 
+                        dictionaryId: dictionaryId
                     });
+                } else {
+                    // Tag Dictionary Import
+                    // Format: [term, mode, data]
+                    const term = item[0];
+                    const mode = item[1];
+                    const metaData = item[2];
+                    
+                    // We only process 'freq' for now as requested, but we can be broader
+                    // User Example: ["相", "freq", {"reading": "あい", "frequency": {"value": -1, "displayValue": "N1"}}]
+                    
+                    let tagValue = '';
+                    if (mode === 'freq' && metaData && metaData.frequency) {
+                        tagValue = metaData.frequency.displayValue || metaData.frequency.value;
+                    } else if (typeof metaData === 'string') {
+                        tagValue = metaData;
+                    } else if (typeof metaData === 'number') {
+                        tagValue = String(metaData);
+                    }
+                    
+                    if (tagValue) {
+                        entries.push({
+                            term,
+                            definitions: [String(tagValue)], // Reuse definitions field to store tag value
+                            dictionaryId: dictionaryId
+                        });
+                    }
                 }
-                
-                entries.push({
-                    term,
-                    reading,
-                    definitions,
-                    tags, // Store tags
-                    dictionaryId: dictionaryId
-                });
+
                 totalCount++;
                 
                 if (entries.length >= batchSize) {
@@ -301,13 +333,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         await saveDictionaryMeta({
             id: dictionaryId,
             name: dictTitle,
+            type: dictImportType, // Save type
             scope: dictImportScope,
             count: totalCount,
             priority: Date.now(),
             importedAt: Date.now()
         });
         
-        alert(`词典 "${dictTitle}" 导入成功！\n共导入 ${totalCount} 条目。`);
+        alert(`词典 "${dictTitle}" (${dictImportType === 'definition' ? '释义' : '标签'}) 导入成功！\n共导入 ${totalCount} 条目。`);
         await refreshDictionaries();
 
     } catch (err) {
@@ -328,18 +361,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleMoveDictionary = async (index: number, direction: 'up' | 'down') => {
-      const newDicts = [...dictionaries];
-      if (direction === 'up' && index > 0) {
-          [newDicts[index], newDicts[index - 1]] = [newDicts[index - 1], newDicts[index]];
-      } else if (direction === 'down' && index < newDicts.length - 1) {
-          [newDicts[index], newDicts[index + 1]] = [newDicts[index + 1], newDicts[index]];
-      } else {
-          return;
-      }
+      // Need to filter list first to get correct index relative to all dictionaries
+      // But we are sorting in display.
+      // Simplest: Find actual items in full list and swap priorities
       
-      // Update priorities based on new order
-      const updatePromises = newDicts.map((d, i) => updateDictionary(d.id, { priority: i }));
-      await Promise.all(updatePromises);
+      const filtered = dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang));
+      if (index < 0 || index >= filtered.length) return;
+
+      const currentItem = filtered[index];
+      let swapItem: DictionaryMeta | null = null;
+      
+      if (direction === 'up' && index > 0) swapItem = filtered[index - 1];
+      if (direction === 'down' && index < filtered.length - 1) swapItem = filtered[index + 1];
+      
+      if (!swapItem) return;
+
+      // Swap priorities
+      const tempP = currentItem.priority;
+      currentItem.priority = swapItem.priority;
+      swapItem.priority = tempP;
+      
+      await updateDictionary(currentItem.id, { priority: currentItem.priority });
+      await updateDictionary(swapItem.id, { priority: swapItem.priority });
+      
       await refreshDictionaries();
   };
 
@@ -417,6 +461,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       }
   };
 
+  const currentAnkiFieldMap = ankiConfigMode === 'word' ? ankiSettings.fieldMap : (ankiSettings.sentenceFieldMap as any || {});
+  
+  const updateAnkiField = (fieldType: string, value: string) => {
+      if (ankiConfigMode === 'word') {
+          setAnkiSettings({
+              ...ankiSettings,
+              fieldMap: { ...ankiSettings.fieldMap, [fieldType]: value }
+          });
+      } else {
+          setAnkiSettings({
+              ...ankiSettings,
+              sentenceFieldMap: { ...ankiSettings.sentenceFieldMap, [fieldType]: value }
+          });
+      }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -485,16 +545,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                <div className="border-b border-gray-200 dark:border-slate-700 pb-4">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.importYomitan}</label>
                   <div className="flex flex-col gap-2">
-                      <select 
-                         value={dictImportScope} 
-                         onChange={(e) => setDictImportScope(e.target.value as any)}
-                         className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-1.5 rounded border border-gray-300 dark:border-slate-700 outline-none"
-                      >
-                          <option value="universal">{t.dictLangUniversal}</option>
-                          {learningLanguages.map(l => (
-                              <option key={l} value={l}>{getLangName(l)} ({l.toUpperCase()})</option>
-                          ))}
-                      </select>
+                      <div className="flex gap-2">
+                        <select 
+                           value={dictImportType} 
+                           onChange={(e) => setDictImportType(e.target.value as DictImportType)}
+                           className="flex-1 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-1.5 rounded border border-gray-300 dark:border-slate-700 outline-none"
+                        >
+                            <option value="definition">释义词典</option>
+                            <option value="tag">标签词典</option>
+                        </select>
+                        <select 
+                           value={dictImportScope} 
+                           onChange={(e) => setDictImportScope(e.target.value as any)}
+                           className="flex-1 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-1.5 rounded border border-gray-300 dark:border-slate-700 outline-none"
+                        >
+                            <option value="universal">{t.dictLangUniversal}</option>
+                            {learningLanguages.map(l => (
+                                <option key={l} value={l}>{getLangName(l)} ({l.toUpperCase()})</option>
+                            ))}
+                        </select>
+                      </div>
                       <input type="file" accept=".zip" onChange={handleYomitanImport} disabled={isImportingDict} className="text-xs text-slate-500 dark:text-slate-400" />
                       {isImportingDict && <p className="text-xs text-indigo-500 animate-pulse">{importProgress}</p>}
                   </div>
@@ -502,20 +572,47 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                
                {/* Management Section */}
                <div>
-                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">已安装词典</label>
-                   {dictionaries.length === 0 ? (
-                       <p className="text-xs text-slate-400 italic">暂无本地词典</p>
+                   <div className="flex justify-between items-center mb-2 gap-2">
+                       <label className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">{t.manageDicts}</label>
+                       <div className="flex gap-1 flex-1 justify-end">
+                           <select 
+                               value={viewDictLang}
+                               onChange={(e) => setViewDictLang(e.target.value)}
+                               className="bg-transparent text-[10px] text-slate-500 font-bold border-none outline-none cursor-pointer max-w-[80px]"
+                           >
+                               <option value="all">All Langs</option>
+                               <option value="universal">Universal</option>
+                               {learningLanguages.map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+                           </select>
+                           <select 
+                               value={viewDictType}
+                               onChange={(e) => setViewDictType(e.target.value as DictImportType)}
+                               className="bg-transparent text-[10px] text-indigo-500 font-bold border-none outline-none cursor-pointer"
+                           >
+                               <option value="definition">{t.dictTypeDefinition}</option>
+                               <option value="tag">{t.dictTypeTag}</option>
+                           </select>
+                       </div>
+                   </div>
+                   
+                   {dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang)).length === 0 ? (
+                       <p className="text-xs text-slate-400 italic">暂无{viewDictType === 'definition' ? '释义' : '标签'}词典</p>
                    ) : (
                        <div className="space-y-2">
-                           {dictionaries.map((dict, idx) => (
+                           {dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang)).map((dict, idx) => (
                                <div key={dict.id} className="bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded p-2 flex flex-col gap-2">
                                    <div className="flex justify-between items-start">
-                                       <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate pr-2" title={dict.name}>{dict.name}</span>
-                                       <div className="flex items-center gap-1">
+                                       <div className="flex flex-col overflow-hidden pr-2">
+                                          <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate" title={dict.name}>{dict.name}</span>
+                                          <span className={`text-[9px] uppercase tracking-wider font-bold inline-block px-1 rounded w-fit mt-1 ${dict.type === 'tag' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300' : 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-300'}`}>
+                                              {dict.type === 'tag' ? 'TAG BANK' : 'DEFINITION'}
+                                          </span>
+                                       </div>
+                                       <div className="flex items-center gap-1 shrink-0">
                                             <button onClick={() => handleMoveDictionary(idx, 'up')} disabled={idx === 0} className="w-5 h-5 flex items-center justify-center rounded bg-gray-200 dark:bg-slate-800 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 disabled:opacity-30">
                                                 <i className="fa-solid fa-arrow-up text-[10px]"></i>
                                             </button>
-                                            <button onClick={() => handleMoveDictionary(idx, 'down')} disabled={idx === dictionaries.length - 1} className="w-5 h-5 flex items-center justify-center rounded bg-gray-200 dark:bg-slate-800 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 disabled:opacity-30">
+                                            <button onClick={() => handleMoveDictionary(idx, 'down')} disabled={idx === dictionaries.filter(d => d.type === viewDictType).length - 1} className="w-5 h-5 flex items-center justify-center rounded bg-gray-200 dark:bg-slate-800 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600 disabled:opacity-30">
                                                 <i className="fa-solid fa-arrow-down text-[10px]"></i>
                                             </button>
                                             <button onClick={() => handleDeleteDictionary(dict.id, dict.name)} className="w-5 h-5 flex items-center justify-center rounded bg-gray-200 dark:bg-slate-800 text-slate-500 hover:bg-red-100 hover:text-red-600">
@@ -726,17 +823,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                        </div>
                        
                        <div>
-                           <label className="block text-[10px] font-bold text-indigo-500 uppercase mb-3">Field Mapping</label>
+                           <div className="flex items-center justify-between mb-3">
+                               <label className="text-[10px] font-bold text-indigo-500 uppercase">Field Mapping</label>
+                               <div className="flex bg-gray-100 dark:bg-slate-900 rounded p-0.5 border border-gray-200 dark:border-slate-700">
+                                   <button 
+                                      onClick={() => setAnkiConfigMode('word')} 
+                                      className={`px-2 py-0.5 text-[9px] rounded transition-all ${ankiConfigMode === 'word' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                                   >
+                                      {t.ankiModeWord}
+                                   </button>
+                                   <button 
+                                      onClick={() => setAnkiConfigMode('sentence')} 
+                                      className={`px-2 py-0.5 text-[9px] rounded transition-all ${ankiConfigMode === 'sentence' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                                   >
+                                      {t.ankiModeSentence}
+                                   </button>
+                               </div>
+                           </div>
+                           
                            <div className="space-y-2">
-                               {['word', 'definition', 'sentence', 'translation', 'audio'].map(fieldType => (
+                               {['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab'].map(fieldType => (
                                    <div key={fieldType} className="flex flex-col gap-1">
                                        <span className="text-[10px] text-slate-500 capitalize">{t[`field${fieldType.charAt(0).toUpperCase() + fieldType.slice(1)}` as keyof typeof t] || fieldType}</span>
                                        <select 
-                                          value={ankiSettings.fieldMap[fieldType as keyof typeof ankiSettings['fieldMap']]} 
-                                          onChange={(e) => setAnkiSettings({
-                                              ...ankiSettings, 
-                                              fieldMap: { ...ankiSettings.fieldMap, [fieldType]: e.target.value }
-                                          })} 
+                                          value={currentAnkiFieldMap[fieldType as keyof typeof currentAnkiFieldMap] || ''} 
+                                          onChange={(e) => updateAnkiField(fieldType, e.target.value)} 
                                           className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-1.5 rounded outline-none text-xs"
                                        >
                                            <option value="">(None)</option>
@@ -745,6 +856,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                    </div>
                                ))}
                            </div>
+                           <p className="text-[9px] text-slate-400 mt-2 italic">
+                               {ankiConfigMode === 'sentence' ? "If a field is left empty in Sentence Mode, it will NOT fallback to Word Mode settings." : "These settings are used when Dictionary is in Word Mode or as fallback."}
+                           </p>
                        </div>
                        
                        <div>

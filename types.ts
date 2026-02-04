@@ -75,18 +75,22 @@ export interface AudioTrack {
   language?: LearningLanguage; // Track specific language
 }
 
+export interface AnkiFieldMap {
+  word: string;
+  definition: string;
+  sentence: string;
+  translation: string;
+  audio: string;
+  examVocab: string;
+}
+
 export interface AnkiSettings {
   host: string;
   port: number;
   deckName: string;
   modelName: string;
-  fieldMap: {
-    word: string;
-    definition: string;
-    sentence: string;
-    translation: string;
-    audio: string;
-  };
+  fieldMap: AnkiFieldMap;
+  sentenceFieldMap?: Partial<AnkiFieldMap>; // Added for Sentence Mode specific mapping
   tags: string;
 }
 
@@ -117,6 +121,7 @@ export interface ReaderSettings {
   webSearchEngine: WebSearchEngine;
   webLinkMode: WebLinkMode;
   copyToClipboard: boolean;
+  dictMode: 'word' | 'sentence'; // Controls initial search behavior
   ttsEnabled: boolean;
   ttsVoice: string;
   ttsRate: number;

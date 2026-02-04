@@ -6,7 +6,7 @@ import { segmentText, isWord, isNonSpacedLang } from '../utils/textUtils';
 import { lookupWord } from '../services/dictionaryService';
 import { addNote } from '../services/ankiService';
 import { extractAudioClip } from '../utils/audioUtils';
-import { searchLocalDictionary } from '../utils/storage';
+import { searchLocalDictionary, getLocalTagsForTerm } from '../utils/storage';
 
 interface Props {
   isOpen: boolean;
@@ -25,35 +25,130 @@ interface Props {
   ttsSettings?: { enabled: boolean; rate: number; pitch: number; volume: number; voice: string };
   settings: ReaderSettings;
   setSettings: (s: ReaderSettings) => void;
+  hasDictionaries: boolean; 
+  onAnkiSuccess?: () => void;
 }
 
 type WebSearchCategory = 'search' | 'translate' | 'encyclopedia';
 
+interface StructuredNode {
+  tag?: string;
+  content?: string | StructuredNode | StructuredNode[];
+  data?: Record<string, any>;
+  style?: Record<string, any>;
+  href?: string;
+  type?: string; 
+}
+
+const StructuredContent: React.FC<{ content: any }> = ({ content }) => {
+  if (content === null || content === undefined) return null;
+
+  if (Array.isArray(content)) {
+    return <>{content.map((child, i) => <StructuredContent key={i} content={child} />)}</>;
+  }
+
+  if (typeof content === 'string') {
+    return <>{content}</>;
+  }
+
+  if (typeof content === 'object') {
+    if (content.type === 'structured-content' && content.content) {
+        return <StructuredContent content={content.content} />;
+    }
+
+    const TagName = (content.tag as string) || 'span';
+    const children = content.content;
+    const style = content.style || {};
+    
+    const props: any = { style };
+    
+    if (content.href) {
+        props.href = content.href;
+        props.target = "_blank";
+        props.rel = "noopener noreferrer";
+        props.className = "text-indigo-600 dark:text-indigo-400 hover:underline";
+    }
+
+    if (TagName === 'a') {
+         return <a {...props}><StructuredContent content={children} /></a>;
+    }
+    
+    if (TagName === 'details') {
+         return <details {...props} className="group"><StructuredContent content={children} /></details>;
+    }
+
+    return React.createElement(TagName, props, <StructuredContent content={children} />);
+  }
+
+  return null;
+};
+
+// Helper to convert structured content object to HTML string for Anki
+const structuredContentToHtml = (content: any): string => {
+    if (content === null || content === undefined) return '';
+
+    if (Array.isArray(content)) {
+        return content.map(child => structuredContentToHtml(child)).join('');
+    }
+
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (typeof content === 'object') {
+        if (content.type === 'structured-content' && content.content) {
+            return structuredContentToHtml(content.content);
+        }
+
+        const TagName = (content.tag as string) || 'span';
+        
+        let attrs = '';
+        if (content.href) {
+            attrs += ` href="${content.href}"`;
+        }
+        if (content.style) {
+            const styleStr = Object.entries(content.style).map(([k, v]) => `${k}:${v}`).join(';');
+            attrs += ` style="${styleStr}"`;
+        }
+
+        const innerHtml = structuredContentToHtml(content.content);
+        return `<${TagName}${attrs}>${innerHtml}</${TagName}>`;
+    }
+
+    return '';
+};
+
 const DictionaryModal: React.FC<Props> = ({ 
   isOpen, onClose, initialWord, initialSegmentIndex, sentence, contextLine, 
   language, learningLanguage, ankiSettings, segmentationMode, webSearchEngine: defaultWebEngine, currentTrack, audioRef, ttsSettings,
-  settings, setSettings
+  settings, setSettings, hasDictionaries, onAnkiSuccess
 }) => {
   const t = getTranslation(language);
-  
-  // Use track language if available, else global setting
   const effectiveLearningLang = currentTrack?.language || learningLanguage;
 
   const [searchTerm, setSearchTerm] = useState(initialWord);
-  const [data, setData] = useState<DictionaryResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  
+  // Independent caches for API and Local results to allow seamless switching
+  const [apiData, setApiData] = useState<DictionaryResponse | null>(null);
+  const [localData, setLocalData] = useState<DictionaryResponse | null>(null);
+  const [apiError, setApiError] = useState('');
+  const [localError, setLocalError] = useState('');
+  const [apiLoading, setApiLoading] = useState(false);
+  const [localLoading, setLocalLoading] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'dict' | 'script' | 'web' | 'custom'>('dict');
-  const [dictSource, setDictSource] = useState<'api' | 'local'>('api');
+  
+  // Persist Dict Source
+  const [dictSource, setDictSource] = useState<'api' | 'local'>(() => {
+      const stored = localStorage.getItem('lf_dict_source');
+      return (stored === 'api' || stored === 'local') ? stored : (hasDictionaries ? 'local' : 'api');
+  });
+
   const [customDef, setCustomDef] = useState('');
   const [isPinned, setIsPinned] = useState(false);
   const [isAddingToAnki, setIsAddingToAnki] = useState(false);
   const [showWebCustomDef, setShowWebCustomDef] = useState(false);
-  
-  // Highlighting State: Indices of segments that are currently selected/searched
   const [highlightRange, setHighlightRange] = useState<{start: number, end: number}>({start: initialSegmentIndex, end: initialSegmentIndex});
-  
-  // Web Tab State
   const [webCategory, setWebCategory] = useState<WebSearchCategory>('translate');
   const [currentWebEngine, setCurrentWebEngine] = useState<WebSearchEngine>(defaultWebEngine);
   const [webHistory, setWebHistory] = useState<string[]>([]);
@@ -65,56 +160,99 @@ const DictionaryModal: React.FC<Props> = ({
     return segmentText(sentence, effectiveLearningLang, segmentationMode);
   }, [sentence, effectiveLearningLang, segmentationMode]);
 
+  // Persist source choice
   useEffect(() => {
-    // Sync local category with engine on open
+      localStorage.setItem('lf_dict_source', dictSource);
+  }, [dictSource]);
+
+  useEffect(() => {
     if (['google', 'baidu', 'bing'].includes(defaultWebEngine)) setWebCategory('search');
     else if (['wikipedia', 'baidu_baike', 'moegirl'].includes(defaultWebEngine)) setWebCategory('encyclopedia');
     else setWebCategory('translate');
   }, [defaultWebEngine]);
 
+  // Initial Load
   useEffect(() => {
     if (isOpen) {
       setSearchTerm(initialWord);
-      setHighlightRange({start: initialSegmentIndex, end: initialSegmentIndex});
+      
       // Reset Web History
       setWebHistory([]);
       setWebHistoryIndex(-1);
       setCurrentWebEngine(defaultWebEngine);
       
-      if (initialWord) fetchDefinition(initialWord);
-    }
-  }, [isOpen, initialWord, initialSegmentIndex, defaultWebEngine]);
+      // Reset Caches for new word
+      setApiData(null);
+      setLocalData(null);
+      setApiError('');
+      setLocalError('');
 
-  // Re-fetch if dictSource changes (fix for API->Local not updating)
-  useEffect(() => {
-      if (isOpen && searchTerm) {
-          fetchDefinition(searchTerm);
+      if (initialWord) {
+          fetchDefinition(initialWord, dictSource);
       }
-  }, [dictSource]);
+      
+      if (settings.dictMode === 'sentence') {
+          setHighlightRange({start: 0, end: segments.length - 1});
+      } else {
+          setHighlightRange({start: initialSegmentIndex, end: initialSegmentIndex});
+      }
+    }
+  }, [isOpen, initialWord, initialSegmentIndex, defaultWebEngine]); // Rely on initialWord change to reset
 
-  const fetchDefinition = async (term: string) => {
+  const fetchDefinition = async (term: string, source: 'api' | 'local') => {
     if (!term) return;
     
-    setLoading(true);
-    setError('');
-    setData(null);
+    if (source === 'local') {
+        setLocalLoading(true);
+        setLocalError('');
+        setLocalData(null); // Clear previous local result to avoid confusion
+        try {
+            const result = await searchLocalDictionary(term, effectiveLearningLang);
+            if (result) setLocalData(result);
+            else setLocalError(hasDictionaries ? t.dictNoResult : t.localDictEmpty);
+        } catch (e) { setLocalError(t.dictNoResult); }
+        finally { setLocalLoading(false); }
+    } else {
+        setApiLoading(true);
+        setApiError('');
+        setApiData(null); // Clear previous api result
+        try {
+            const result = await lookupWord(term, effectiveLearningLang);
+            
+            // Try to enhance API result with Local Tags if possible
+            const localTags = await getLocalTagsForTerm(term, effectiveLearningLang);
+            if (localTags.length > 0) {
+                if (result) {
+                    result.entries.forEach(e => {
+                        const existingTags = new Set(e.tags || []);
+                        localTags.forEach(tag => existingTags.add(tag));
+                        e.tags = Array.from(existingTags);
+                    });
+                } else {
+                    // Create dummy result for tags
+                     const tagResult: DictionaryResponse = {
+                         word: term,
+                         entries: [{
+                             partOfSpeech: 'Tags',
+                             pronunciations: [],
+                             senses: [{ definition: 'No definition found, only tags available.', examples: [], subsenses: [] }],
+                             tags: localTags
+                         }]
+                     };
+                     setApiData(tagResult);
+                     setApiLoading(false);
+                     return;
+                }
+            }
 
-    try {
-      if (dictSource === 'local') {
-          const res = await searchLocalDictionary(term, effectiveLearningLang);
-          if (res) setData(res);
-          else setError(t.dictNoResult);
-      } else {
-          const res = await lookupWord(term, effectiveLearningLang);
-          if (res) setData(res);
-          else setError(t.dictNoResult);
-      }
-    } catch (e) { setError(t.dictNoResult); }
-    finally { setLoading(false); }
+            if (result) setApiData(result);
+            else setApiError(t.dictNoResult);
+        } catch (e) { setApiError(t.dictNoResult); }
+        finally { setApiLoading(false); }
+    }
   };
 
   const getTargetLangCode = (appLang: Language) => {
-      // Return target language code for translation services based on UI language
       if (appLang === 'zh' || appLang === 'zh-TW') return 'zh-Hans';
       return 'en';
   };
@@ -124,7 +262,7 @@ const DictionaryModal: React.FC<Props> = ({
       const encodedTerm = encodeURIComponent(term);
       
       switch (engine) {
-          case 'google': return `https://www.google.com/search?q=${encodedTerm}&igu=1`; // igu=1 helps google embedding sometimes
+          case 'google': return `https://www.google.com/search?q=${encodedTerm}&igu=1`; 
           case 'baidu': return `https://www.baidu.com/s?wd=${encodedTerm}`;
           case 'baidu_baike': return `https://baike.baidu.com/item/${encodedTerm}`;
           case 'bing': return `https://www.bing.com/search?q=${encodedTerm}`;
@@ -137,7 +275,6 @@ const DictionaryModal: React.FC<Props> = ({
       }
   };
 
-  // Push new URL to history stack
   const navigateToUrl = (url: string) => {
       if (settings.webLinkMode === 'external') {
           window.open(url, '_blank');
@@ -153,16 +290,43 @@ const DictionaryModal: React.FC<Props> = ({
     const actualTerm = term || searchTerm;
     if (!actualTerm.trim()) return;
     
-    // Always fetch definition regardless of tab, so switching tabs works
-    fetchDefinition(actualTerm);
+    // Always fetch for the current source when actively searching
+    fetchDefinition(actualTerm, dictSource);
 
-    // Update Web Tab if needed or reset history for new term
     const url = constructWebSearchUrl(currentWebEngine, actualTerm);
-    // Reset history for new word
     if (settings.webLinkMode !== 'external') {
       setWebHistory([url]);
       setWebHistoryIndex(0);
     }
+  };
+
+  // Helper to handle manual source switching without auto-fetching if cached
+  const handleSourceSwitch = (newSource: 'api' | 'local') => {
+      setDictSource(newSource);
+      // If we switch source and don't have data for that source yet, should we auto-fetch?
+      // User requirement: "won't immediately clear... unless re-click search"
+      // Interpret: If we have data, show it. If we don't, show empty state but don't force clear valid data from OTHER source.
+      // Since we use separate states (apiData, localData), valid data persists in its own state.
+      // We just need to check if the NEW source has data. If not, maybe we fetch? 
+      // User said: "switching... won't clear... keep cache". 
+      // If I switch to Local and localData is null, I probably *should* fetch if it's the first time.
+      // But if I switch back to API and apiData exists, I show apiData.
+      
+      // Implementation: Check if target cache is empty for *current term*. 
+      // If current term matches the term active in that cache? We don't track "term per cache".
+      // We assume cache is for `searchTerm`.
+      if (newSource === 'api' && !apiData && !apiLoading) {
+          // If empty, we can either fetch or show blank. 
+          // "Unless re-click search" implies we shouldn't fetch automatically?
+          // But usually switching tabs means "Search this word in Local".
+          // Let's assume automatic fetch on switch IS desired if empty, but NOT clearing if switching back.
+          // Wait, the prompt says "won't immediately clear content". This suggests preserving the *view*.
+          // But if I switch source, the view *must* change to the new source.
+          // Let's implement: Auto-fetch if null. If not null (cached), just show.
+          fetchDefinition(searchTerm, newSource);
+      } else if (newSource === 'local' && !localData && !localLoading) {
+          fetchDefinition(searchTerm, newSource);
+      }
   };
 
   const handleAppendSegment = useCallback(() => {
@@ -177,7 +341,7 @@ const DictionaryModal: React.FC<Props> = ({
     setSearchTerm(newTerm);
     setHighlightRange(prev => ({ ...prev, end: nextIdx }));
     handleSearch(newTerm);
-  }, [searchTerm, segments, highlightRange, effectiveLearningLang, activeTab, currentWebEngine, settings.webLinkMode]);
+  }, [searchTerm, segments, highlightRange, effectiveLearningLang, activeTab, currentWebEngine, settings.webLinkMode, dictSource]);
 
   const handleCopyFullSentence = () => {
       setSearchTerm(sentence);
@@ -216,6 +380,48 @@ const DictionaryModal: React.FC<Props> = ({
     }
     window.speechSynthesis.speak(utterance);
   };
+  
+  // Use current data source
+  const currentData = dictSource === 'api' ? apiData : localData;
+  const currentLoading = dictSource === 'api' ? apiLoading : localLoading;
+  const currentError = dictSource === 'api' ? apiError : localError;
+
+  // Aggregate tags for header display
+  const allHeaderTags = useMemo(() => {
+    if (!currentData) return [];
+    const set = new Set<string>();
+    currentData.entries.forEach(e => {
+        if (e.tags) e.tags.forEach(t => set.add(t));
+    });
+    return Array.from(set);
+  }, [currentData]);
+
+  // Construct structured HTML for Anki based on current data
+  const formatAnkiDefinition = (dictData: DictionaryResponse): string => {
+      if (!dictData.entries || dictData.entries.length === 0) return dictData.word;
+      
+      return dictData.entries.map(entry => {
+          const sensesHtml = entry.senses.map(s => {
+              let defContent = s.definition;
+              // Check if definition is a JSON string of structured content
+              try {
+                  if (typeof defContent === 'string' && defContent.trim().startsWith('{') && defContent.includes('"type":"structured-content"')) {
+                      const parsed = JSON.parse(defContent);
+                      defContent = structuredContentToHtml(parsed);
+                  }
+              } catch (e) {
+                  // Fallback to original string if parse fails
+              }
+              
+              return `<li>${defContent}</li>`;
+          }).join('');
+          
+          return `<div class="entry">
+              <div class="pos-header"><b>[${entry.partOfSpeech}]</b></div>
+              <ul>${sensesHtml}</ul>
+          </div>`;
+      }).join('<hr/>');
+  };
 
   const handleAddToAnki = async (contentOverride?: string) => {
     if (activeTab === 'custom' && !customDef.trim()) {
@@ -226,27 +432,58 @@ const DictionaryModal: React.FC<Props> = ({
     try {
       let definition = customDef;
       
-      // If granular definition is passed, use it directly
       if (contentOverride) {
           definition = contentOverride;
-      } else if (activeTab === 'dict' && data) {
-          // Default: Add all entries found
-          definition = data.entries.map(e => `<div><b>[${e.partOfSpeech}]</b><ul>${e.senses.map(s => `<li>${s.definition}</li>`).join('')}</ul></div>`).join('<hr/>');
+          // Check if override itself is structured JSON
+          try {
+              if (definition.trim().startsWith('{') && definition.includes('"type":"structured-content"')) {
+                  const parsed = JSON.parse(definition);
+                  definition = structuredContentToHtml(parsed);
+              }
+          } catch(e) {}
+      } else if (activeTab === 'dict' && currentData) {
+          // Use formatter
+          definition = formatAnkiDefinition(currentData);
       }
       
       let audioBase64 = undefined;
+      // Use recording replay method instead of cropping
       if (ankiSettings.fieldMap.audio && currentTrack?.file) {
         audioBase64 = await extractAudioClip(currentTrack.file, contextLine.start, contextLine.end);
       }
-      await addNote(ankiSettings, {
+
+      // Collect tags for examVocab field if present
+      const examVocabContent = allHeaderTags.length > 0 ? allHeaderTags.join(' ') : '';
+
+      // Fallback logic for sentence mode
+      const isSentenceMode = settings.dictMode === 'sentence';
+      let effectiveFieldMap = ankiSettings.fieldMap;
+      if (isSentenceMode && ankiSettings.sentenceFieldMap && Object.keys(ankiSettings.sentenceFieldMap).length > 0) {
+          // Merge sentence map over default map
+          effectiveFieldMap = { ...ankiSettings.fieldMap, ...ankiSettings.sentenceFieldMap };
+      }
+
+      // Temporarily swap fieldMap in settings object passed to addNote 
+      // (creating a temporary settings object)
+      const tempSettings: AnkiSettings = {
+          ...ankiSettings,
+          fieldMap: effectiveFieldMap as any
+      };
+
+      await addNote(tempSettings, {
         word: searchTerm,
         definition: definition || searchTerm,
         sentence: sentence.replace(searchTerm, `<b>${searchTerm}</b>`),
         translation: '',
-        audioBase64
+        audioBase64,
+        examVocab: examVocabContent
       });
-      alert(t.ankiSuccess);
-    } catch (e) { alert(t.ankiError); }
+      
+      if (onAnkiSuccess) onAnkiSuccess();
+    } catch (e) { 
+        console.error(e);
+        alert(t.ankiError); 
+    }
     finally { setIsAddingToAnki(false); }
   };
 
@@ -283,6 +520,32 @@ const DictionaryModal: React.FC<Props> = ({
       setSettings({...settings, webLinkMode: newMode});
   };
 
+  const toggleDictMode = () => {
+      const newMode = settings.dictMode === 'word' ? 'sentence' : 'word';
+      setSettings({...settings, dictMode: newMode});
+      
+      // Auto-populate logic based on new mode
+      if (newMode === 'sentence') {
+          setSearchTerm(sentence);
+          setHighlightRange({start: 0, end: segments.length - 1});
+          // Trigger search immediately for the full sentence
+          // Use setTimeout to ensure state update settles if needed, though usually safe here
+          // But safer to call fetch directly with 'sentence' to avoid closure stale state
+          fetchDefinition(sentence, dictSource);
+          
+          const url = constructWebSearchUrl(currentWebEngine, sentence);
+          if (settings.webLinkMode !== 'external') {
+            setWebHistory([url]);
+            setWebHistoryIndex(0);
+          }
+      } else {
+          // Switch to Word mode: Clear input
+          setSearchTerm('');
+          setHighlightRange({start: -1, end: -1});
+          // Do not search empty string
+      }
+  };
+
   const renderWebOptions = () => {
       switch(webCategory) {
           case 'search':
@@ -295,19 +558,68 @@ const DictionaryModal: React.FC<Props> = ({
       }
   };
 
+  const renderDefinitionContent = (definition: string) => {
+      try {
+          if (definition.trim().startsWith('{"type":"structured-content"')) {
+              const parsed = JSON.parse(definition);
+              return <StructuredContent content={parsed} />;
+          }
+      } catch (e) { }
+      
+      if (/[①-⑳㋐-㋾▲△ᐅ〔]/.test(definition)) {
+          const parts = definition.split(/(?=[①-⑳㋐-㋾▲△ᐅ〔])/);
+          return (
+            <div className="leading-snug text-sm">
+                {parts.map((part, i) => {
+                    const cleanPart = part.trim();
+                    if (!cleanPart) return null;
+                    
+                    if (part.match(/^[①-⑳]/)) {
+                         return <div key={i} className="mt-1 mb-0.5 pl-1 border-l-2 border-indigo-200 dark:border-indigo-800"><span className="font-bold text-indigo-600 dark:text-indigo-400 mr-1">{part.charAt(0)}</span>{part.substring(1)}</div>;
+                    }
+                    if (part.match(/^[㋐-㋾]/)) {
+                         return <div key={i} className="ml-4 mt-0.5"><span className="font-bold text-slate-600 dark:text-slate-400 mr-1">{part.charAt(0)}</span>{part.substring(1)}</div>;
+                    }
+                    if (part.match(/^[▲△]/)) {
+                         return <div key={i} className="ml-8 mt-0.5 text-xs text-slate-500 dark:text-slate-400 font-mono flex items-start"><span className="mr-1 opacity-70">▲</span><span>{part.substring(1)}</span></div>;
+                    }
+                    if (part.match(/^[ᐅ]/)) {
+                         return <div key={i} className="ml-2 mt-0.5 text-xs text-slate-500 font-bold">ᐅ {part.substring(1)}</div>;
+                    }
+                    if (part.match(/^[〔]/)) {
+                         return <div key={i} className="mt-1 text-xs text-slate-400 block">{part}</div>;
+                    }
+                    
+                    return <div key={i} className="mb-0.5">{part}</div>;
+                })}
+            </div>
+          );
+      }
+      
+      return definition;
+  };
+
   const currentWebUrl = webHistory.length > 0 ? webHistory[webHistoryIndex] : constructWebSearchUrl(currentWebEngine, searchTerm);
+  const isCJK = isNonSpacedLang(effectiveLearningLang);
 
   if (!isOpen) return null;
-  const isCJK = isNonSpacedLang(effectiveLearningLang);
 
   return (
     <>
       <div className="fixed inset-0 bg-black/40 z-[90]" onClick={onClose} />
       <div className="fixed top-0 right-0 h-full w-full md:w-[450px] bg-white dark:bg-slate-900 border-l border-gray-200 dark:border-slate-700 shadow-2xl z-[100] flex flex-col transition-all animate-slide-in">
-        {/* Header Search Bar */}
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50 flex flex-col gap-3 shrink-0 transition-colors">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold flex items-center gap-2 text-slate-800 dark:text-white text-sm"><i className="fa-solid fa-book text-indigo-500 dark:text-indigo-400"></i> {t.dictClassic}</h3>
+            <div className="flex items-center gap-2">
+                <h3 className="font-bold flex items-center gap-2 text-slate-800 dark:text-white text-sm"><i className="fa-solid fa-book text-indigo-500 dark:text-indigo-400"></i> {t.dictClassic}</h3>
+                <button 
+                    onClick={toggleDictMode} 
+                    className={`ml-2 p-1.5 rounded text-[10px] font-bold uppercase tracking-wide border transition-all ${settings.dictMode === 'sentence' ? 'bg-indigo-100 text-indigo-600 border-indigo-200 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/30' : 'bg-gray-100 text-slate-500 border-gray-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}
+                    title={settings.dictMode === 'sentence' ? "Sentence Mode" : "Word Mode"}
+                >
+                    {settings.dictMode === 'sentence' ? (language === 'zh' ? '句子模式' : 'SENTENCE') : (language === 'zh' ? '单词模式' : 'WORD')}
+                </button>
+            </div>
             <div className="flex items-center gap-2">
               <button onClick={() => setIsPinned(!isPinned)} className={`p-2 rounded-full ${isPinned ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-400/10' : 'text-slate-400 hover:text-slate-600 dark:hover:text-white'}`}><i className="fa-solid fa-thumbtack"></i></button>
               <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"><i className="fa-solid fa-xmark"></i></button>
@@ -330,11 +642,9 @@ const DictionaryModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Sentence Bar */}
         <div className="bg-gray-50 dark:bg-slate-800/30 border-b border-gray-200 dark:border-slate-700/50 p-3 flex gap-2 items-center shrink-0 transition-colors">
           <div className={`flex-1 flex flex-wrap text-sm text-slate-600 dark:text-slate-300 ${isCJK ? 'gap-0' : 'gap-1'}`}>
             {segments.map((seg, i) => {
-              // Highlighting Logic: Check if index is within the selected range
               const isHighlighted = i >= highlightRange.start && i <= highlightRange.end;
               return (
                   <span key={i} onClick={() => { setSearchTerm(seg); setHighlightRange({start: i, end: i}); handleSearch(seg); if(settings.copyToClipboard) navigator.clipboard.writeText(seg); }} 
@@ -347,7 +657,33 @@ const DictionaryModal: React.FC<Props> = ({
           <button onClick={handleReplaySentence} className="p-2 text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 shrink-0" title={t.replaySentence}><i className="fa-solid fa-rotate-right"></i></button>
         </div>
 
-        {/* Tab Navigation */}
+        {/* Persistent Word Bar - Now visible on all tabs */}
+        <div className="p-2 border-b border-gray-200 dark:border-slate-700 flex flex-col bg-gray-50 dark:bg-slate-800/30 transition-colors shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-slate-800 dark:text-white px-2 truncate max-w-[200px]">{searchTerm}</span>
+                <button onClick={handleTTS} className="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i className="fa-solid fa-volume-high"></i></button>
+                {/* Inline Tags Display */}
+                {allHeaderTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                      {allHeaderTags.map((tag, idx) => (
+                          <span key={idx} className="inline-block px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 text-[9px] font-bold uppercase rounded border border-indigo-100 dark:border-indigo-800/50">
+                              {tag}
+                          </span>
+                      ))}
+                  </div>
+                )}
+            </div>
+            {/* API/Local Toggle only visible in Dict tab */}
+            {activeTab === 'dict' && (
+                <div className="flex bg-gray-200 dark:bg-slate-900 rounded p-0.5 border border-gray-300 dark:border-slate-700 shrink-0 ml-2">
+                    <button onClick={() => handleSourceSwitch('api')} className={`px-2 py-0.5 text-[10px] rounded transition-all ${dictSource === 'api' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}>API</button>
+                    <button onClick={() => handleSourceSwitch('local')} className={`px-2 py-0.5 text-[10px] rounded transition-all ${dictSource === 'local' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}>Local</button>
+                </div>
+            )}
+          </div>
+        </div>
+
         <div className="flex justify-around border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/20 shrink-0 transition-colors">
           {(['dict', 'script', 'web', 'custom'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-widest border-b-2 transition-all ${activeTab === tab ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-white dark:bg-white/5' : 'border-transparent text-slate-500'}`}>
@@ -356,50 +692,42 @@ const DictionaryModal: React.FC<Props> = ({
           ))}
         </div>
 
-        {/* Tab Content */}
         <div className="flex-1 overflow-hidden relative bg-white dark:bg-slate-900 transition-colors">
-          {activeTab === 'dict' && (
-            <div className="h-full flex flex-col">
-              <div className="p-2 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between bg-gray-50 dark:bg-slate-800/30 transition-colors">
-                  <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-800 dark:text-white px-2 truncate max-w-[200px]">{searchTerm}</span>
-                      <button onClick={handleTTS} className="text-slate-400 hover:text-slate-800 dark:hover:text-white"><i className="fa-solid fa-volume-high"></i></button>
-                  </div>
-                  <div className="flex bg-gray-200 dark:bg-slate-900 rounded p-0.5 border border-gray-300 dark:border-slate-700">
-                      <button onClick={() => setDictSource('api')} className={`px-2 py-0.5 text-[10px] rounded transition-all ${dictSource === 'api' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}>API</button>
-                      <button onClick={() => setDictSource('local')} className={`px-2 py-0.5 text-[10px] rounded transition-all ${dictSource === 'local' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}>Local</button>
-                  </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-5">
-                  {dictSource === 'local' && !data ? (
-                     <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3 text-center p-4">
-                        <i className="fa-solid fa-folder-open text-3xl opacity-30"></i>
-                        <p className="text-xs">{loading ? t.dictQuerying : t.localDictEmpty}</p>
-                     </div>
-                  ) : loading ? (
+          <div className={`h-full flex flex-col ${activeTab === 'dict' ? 'block' : 'hidden'}`}>
+              {/* Added select-text to allow copying */}
+              <div className="flex-1 overflow-y-auto p-4 yomitan-content select-text cursor-text">
+                  <style>{`
+                    .yomitan-content p { margin: 0 0 2px 0; }
+                    .yomitan-content ul, .yomitan-content ol { padding-left: 1.2em; margin: 0 0 2px 0; }
+                    .yomitan-content li { margin-bottom: 1px; }
+                    .yomitan-content .group { margin-bottom: 4px; }
+                    .yomitan-content div { line-height: 1.4; }
+                  `}</style>
+                  {currentLoading ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3"><i className="fa-solid fa-spinner animate-spin text-2xl"></i><span>{t.dictQuerying}</span></div>
-                  ) : error ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-500 py-10"><i className="fa-solid fa-triangle-exclamation text-3xl mb-3 opacity-20"></i><p>{error}</p></div>
-                  ) : data ? (
-                    <div className="animate-fade-in space-y-6">
-                      {data.entries.map((entry, i) => (
-                        <div key={i}>
-                          <div className="flex flex-wrap gap-2 mb-3">
-                              <span className="inline-block px-2 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase rounded">{entry.partOfSpeech}</span>
-                              {entry.tags && entry.tags.map(tag => (
-                                  <span key={tag} className="inline-block px-2 py-0.5 bg-gray-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-[10px] rounded">{tag}</span>
-                              ))}
-                          </div>
-                          <div className="space-y-4">
+                  ) : currentError ? (
+                     <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3 text-center p-4">
+                        <i className={`fa-solid ${dictSource === 'local' ? 'fa-folder-open' : 'fa-triangle-exclamation'} text-3xl opacity-30`}></i>
+                        <p className="text-xs">{currentError}</p>
+                     </div>
+                  ) : currentData ? (
+                    <div className="animate-fade-in space-y-3">
+                      {currentData.entries.map((entry, i) => (
+                        <details key={i} open className="group mb-2 bg-white dark:bg-slate-800/40 rounded-xl overflow-hidden border border-gray-100 dark:border-slate-700/50 shadow-sm">
+                          <summary className="flex items-center gap-2 p-2 bg-gray-50/50 dark:bg-slate-800/80 cursor-pointer list-none select-none hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                              <span className="w-5 h-5 flex items-center justify-center bg-white dark:bg-slate-900 rounded text-slate-400 group-open:rotate-90 transition-transform"><i className="fa-solid fa-chevron-right text-[10px]"></i></span>
+                              <span className="inline-block px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase rounded">{entry.partOfSpeech}</span>
+                              <div className="flex-1"></div>
+                          </summary>
+                          <div className="p-3 space-y-3">
                             {entry.senses.map((s, j) => (
-                              <div key={j} className="pl-4 border-l-2 border-gray-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 group relative">
-                                <p className="leading-relaxed pr-8">
-                                    {s.definition}
-                                </p>
-                                {/* Granular Add Button - Always visible as requested */}
+                              <div key={j} className="text-sm text-slate-700 dark:text-slate-300 group/sense relative">
+                                <div className="leading-relaxed pr-8">
+                                    {renderDefinitionContent(s.definition)}
+                                </div>
                                 <button 
                                     onClick={() => handleAddToAnki(s.definition)} 
-                                    className="absolute right-0 top-0 text-slate-400 hover:text-indigo-500 transition-colors"
+                                    className="absolute right-0 top-0 text-slate-300 hover:text-indigo-500 transition-colors opacity-0 group-hover/sense:opacity-100"
                                     title="Add only this definition to Anki"
                                 >
                                     <i className="fa-solid fa-plus-circle"></i>
@@ -407,38 +735,32 @@ const DictionaryModal: React.FC<Props> = ({
                               </div>
                             ))}
                           </div>
-                        </div>
+                        </details>
                       ))}
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-20"><i className="fa-solid fa-book-open text-5xl"></i></div>
                   )}
               </div>
-            </div>
-          )}
+          </div>
 
-          {activeTab === 'script' && (
+          <div className={`h-full flex flex-col ${activeTab === 'script' ? 'block' : 'hidden'}`}>
              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4 p-8 text-center">
                 <i className="fa-solid fa-scroll text-4xl opacity-30"></i>
                 <p className="text-xs">{t.dictWaitingExternal}</p>
              </div>
-          )}
+          </div>
 
-          {activeTab === 'web' && (
-            <div className="h-full flex flex-col">
-              {/* Refactored Header: Swapped positions of Nav and Search */}
+          <div className={`h-full flex flex-col ${activeTab === 'web' ? 'block' : 'hidden'}`}>
               <div className="p-2 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/30 transition-colors flex items-center gap-2 overflow-x-auto no-scrollbar">
-                  {/* Navigation Buttons Group - Now on Left */}
                   <div className="flex gap-0.5 shrink-0">
                       <button onClick={handleWebBack} disabled={webHistoryIndex <= 0} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webBack}><i className="fa-solid fa-arrow-left text-[10px]"></i></button>
                       <button onClick={handleWebForward} disabled={webHistoryIndex >= webHistory.length - 1} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webForward}><i className="fa-solid fa-arrow-right text-[10px]"></i></button>
                       <button onClick={handleWebRefresh} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400" title={t.webRefresh}><i className="fa-solid fa-rotate-right text-[10px]"></i></button>
                   </div>
 
-                  {/* Divider */}
                   <div className="h-4 w-px bg-gray-300 dark:bg-slate-700 shrink-0"></div>
 
-                  {/* Dropdowns Group */}
                   <div className="flex gap-1 shrink-0">
                     <select 
                        value={webCategory} 
@@ -464,12 +786,10 @@ const DictionaryModal: React.FC<Props> = ({
                     </select>
                   </div>
                   
-                  {/* Link Mode Toggle */}
                   <button onClick={toggleLinkMode} className={`ml-auto w-7 h-7 flex items-center justify-center rounded shrink-0 ${settings.webLinkMode === 'external' ? 'text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10' : 'text-slate-400 hover:text-slate-600'}`} title={settings.webLinkMode === 'external' ? 'External Browser' : 'Embedded View'}>
                       <i className={`fa-solid ${settings.webLinkMode === 'external' ? 'fa-up-right-from-square' : 'fa-window-maximize'} text-[10px]`}></i>
                   </button>
 
-                  {/* Edit Toggle */}
                   <button onClick={() => setShowWebCustomDef(!showWebCustomDef)} className={`w-7 h-7 flex items-center justify-center rounded shrink-0 ${showWebCustomDef ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}><i className="fa-solid fa-pen-to-square text-[10px]"></i></button>
               </div>
               
@@ -494,11 +814,9 @@ const DictionaryModal: React.FC<Props> = ({
                    <textarea value={customDef} onChange={(e) => setCustomDef(e.target.value)} className="w-full bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-white outline-none h-20 resize-none" placeholder={t.dictCustomPlaceholder} />
                 </div>
               )}
-            </div>
-          )}
+          </div>
 
-          {activeTab === 'custom' && (
-            <div className="h-full flex flex-col">
+          <div className={`h-full flex flex-col ${activeTab === 'custom' ? 'block' : 'hidden'}`}>
               <div className="p-2 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between bg-gray-50 dark:bg-slate-800/30 transition-colors">
                   <div className="flex items-center gap-3 px-2">
                       <button onClick={toggleClipboard} className={`text-sm ${settings.copyToClipboard ? 'text-indigo-500 dark:text-indigo-400' : 'text-slate-500'}`} title={t.clipboardMode}><i className="fa-solid fa-paste"></i></button>
@@ -508,8 +826,7 @@ const DictionaryModal: React.FC<Props> = ({
                   <button onClick={() => setCustomDef('')} className="text-slate-500 hover:text-slate-800 dark:hover:text-white text-xs px-2"><i className="fa-solid fa-eraser"></i></button>
               </div>
               <textarea value={customDef} onChange={(e) => setCustomDef(e.target.value)} className="flex-1 w-full bg-white dark:bg-slate-800/20 border-0 p-4 text-slate-800 dark:text-white text-sm outline-none resize-none transition-colors" placeholder={t.dictCustomPlaceholder} />
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </>

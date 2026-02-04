@@ -96,6 +96,7 @@ export const translations = {
     fieldSentence: "Sentence",
     fieldTrans: "Translation",
     fieldAudio: "Audio",
+    fieldExamVocab: "Exam Vocabulary",
     ankiTags: "Tags",
     interface: "Interface",
     sttSettings: "Speech Recognition",
@@ -181,6 +182,11 @@ export const translations = {
     trackLanguage: "Track Language",
     exportNotes: "Export Study Notes",
     defaultLang: "Default (App Setting)",
+    ankiModeWord: "Word Mode Fields",
+    ankiModeSentence: "Sentence Mode Fields",
+    manageDicts: "Manage Dictionaries",
+    dictTypeDefinition: "Definition Dictionaries",
+    dictTypeTag: "Tag Dictionaries",
   },
   zh: {
     appTitle: "LinguaFlow",
@@ -276,6 +282,7 @@ export const translations = {
     fieldSentence: "例句",
     fieldTrans: "翻译",
     fieldAudio: "音频",
+    fieldExamVocab: "考试词汇",
     ankiTags: "标签",
     interface: "界面",
     sttSettings: "语音识别",
@@ -361,6 +368,11 @@ export const translations = {
     trackLanguage: "条目语言",
     exportNotes: "导出学习笔记",
     defaultLang: "默认 (全局设置)",
+    ankiModeWord: "单词模式字段",
+    ankiModeSentence: "句子模式字段",
+    manageDicts: "管理词典",
+    dictTypeDefinition: "释义词典",
+    dictTypeTag: "标签词典",
   }
 };
 

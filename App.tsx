@@ -4,8 +4,8 @@ import { SUPPORTED_SUBTITLE_TYPES } from './constants';
 import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine } from './types';
 import { getTranslation } from './utils/i18n';
 import { parseChapters } from './utils/chapterUtils';
-import { parseSRT, parseLRC, parseVTT, parseASS } from './utils/parsers';
-import { saveTrackToDB, getAllTracksFromDB, deleteTrackFromDB, updateTrackMetadataInDB } from './utils/storage';
+import { parseSRT, parseLRC, parseVTT, parseASS, formatTime } from './utils/parsers';
+import { saveTrackToDB, getAllTracksFromDB, deleteTrackFromDB, updateTrackMetadataInDB, getDictionaries } from './utils/storage';
 import { detectAudioSegments } from './utils/audioSegmenter';
 import * as AnkiService from './services/ankiService';
 import { PlayerControls } from './components/PlayerControls';
@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   webSearchEngine: 'bing_trans',
   webLinkMode: 'inline',
   copyToClipboard: false,
+  dictMode: 'word',
   ttsEnabled: true,
   ttsVoice: '',
   ttsRate: 1,
@@ -42,7 +43,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
 
 const loadConfig = <T,>(key: string, fallback: T): T => {
   try {
-    const stored = localStorage.getItem('lf_settings_v5');
+    const stored = localStorage.getItem(key);
     return stored ? { ...fallback, ...JSON.parse(stored) } : fallback;
   } catch (e) { return fallback; }
 };
@@ -63,7 +64,8 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<ReaderSettings>(() => loadConfig('lf_settings_v5', DEFAULT_SETTINGS));
   const [ankiSettings, setAnkiSettings] = useState<AnkiSettings>(() => loadConfig('lf_anki', {
     host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic',
-    fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '' },
+    fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '' },
+    sentenceFieldMap: {},
     tags: 'linguaflow'
   }));
 
@@ -91,6 +93,9 @@ const App: React.FC = () => {
   const [showFullSubList, setShowFullSubList] = useState(false);
   const [showOffsetControl, setShowOffsetControl] = useState(false);
 
+  // Toast State
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   // AB Loop & Sentence Repeat
   const [loopA, setLoopA] = useState<number | null>(null);
   const [loopB, setLoopB] = useState<number | null>(null);
@@ -101,13 +106,24 @@ const App: React.FC = () => {
   const [dictionaryContext, setDictionaryContext] = useState<SubtitleLine>({id:'', start:0, end:0, text:''});
   const [isOpeningTrack, setIsOpeningTrack] = useState(false);
   const [wasPlayingBeforeModal, setWasPlayingBeforeModal] = useState(false);
+  const [hasDictionaries, setHasDictionaries] = useState(false);
 
   const currentTrack = useMemo(() => audioTracks.find(t => t.id === currentTrackId), [audioTracks, currentTrackId]);
   const currentDisplaySubtitles = useMemo(() => activeSubtitleType === 'primary' ? subtitles : secondarySubtitles, [activeSubtitleType, subtitles, secondarySubtitles]);
 
+  // Derived state for segmentation: if dictMode is 'sentence', force 'none'
+  const effectiveSegmentationMode = useMemo(() => {
+      return settings.dictMode === 'sentence' ? 'none' : settings.segmentationMode;
+  }, [settings.dictMode, settings.segmentationMode]);
+
   useEffect(() => { localStorage.setItem('lf_settings_v5', JSON.stringify(settings)); }, [settings]);
   useEffect(() => { localStorage.setItem('lf_anki', JSON.stringify(ankiSettings)); }, [ankiSettings]);
   
+  // Check if dictionaries exist for empty state UI
+  useEffect(() => {
+    getDictionaries().then(dicts => setHasDictionaries(dicts.length > 0));
+  }, [showDictionaryModal, showSettings]); // Refresh when settings close (might have added/deleted dicts)
+
   // FIXED: Wrapped setAudioTracks in an arrow function to avoid potential second argument from Promise resolution
   useEffect(() => { 
     getAllTracksFromDB().then(tracks => setAudioTracks(tracks)); 
@@ -128,6 +144,11 @@ const App: React.FC = () => {
       audioRef.current.playbackRate = playbackRate;
     }
   }, [playbackRate]);
+
+  const showToast = (msg: string) => {
+      setToastMessage(msg);
+      setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const safePause = useCallback(() => { if (audioRef.current) { audioRef.current.pause(); setIsPlaying(false); } }, []);
   const safePlay = useCallback(async () => { if (audioRef.current) { try { await audioRef.current.play(); setIsPlaying(true); } catch (err) {} } }, []);
@@ -160,9 +181,12 @@ const App: React.FC = () => {
       }
   }, [currentDisplaySubtitles, activeSubtitleIndex]);
 
-  const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
+  const handleGlobalKeyDown = useCallback((e: KeyboardEvent | { code: string, preventDefault: () => void }) => {
+    // This handler can accept a synthetic event object for gamepad support
+    
     if (showSettings) return; // Disable shortcuts if settings panel is open
-    if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+    // Only check target tagName if it's a real keyboard event
+    if ('target' in e && ['INPUT', 'TEXTAREA'].includes(((e as KeyboardEvent).target as HTMLElement).tagName)) return;
 
     if (showDictionaryModal) {
       const kb = settings.keybindings.dictionary;
@@ -178,7 +202,12 @@ const App: React.FC = () => {
       if (e.code === kb.sidebar) { e.preventDefault(); setShowSidePanel(prev => !prev); }
       if (e.code === kb.dict) { e.preventDefault(); if (activeSubtitleIndex !== -1) { 
         const line = currentDisplaySubtitles[activeSubtitleIndex];
-        setDictionaryTargetWord(line.text.split(' ')[0] || '');
+        // For shortcut dictionary opening, respect mode
+        if (settings.dictMode === 'sentence') {
+            setDictionaryTargetWord(line.text);
+        } else {
+            setDictionaryTargetWord(line.text.split(' ')[0] || ''); // Fallback to first word or empty
+        }
         setDictionaryTargetIndex(0);
         setWasPlayingBeforeModal(isPlaying);
         setDictionaryContext(line);
@@ -192,9 +221,68 @@ const App: React.FC = () => {
   }, [view, showDictionaryModal, showSettings, settings, isPlaying, safePlay, safePause, activeSubtitleIndex, currentDisplaySubtitles, wasPlayingBeforeModal, handleForward, handleRewind]);
 
   useEffect(() => {
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [handleGlobalKeyDown]);
+    // Native Keyboard Listener
+    const nativeHandler = (e: KeyboardEvent) => {
+        if (settings.inputSource === 'keyboard') {
+            handleGlobalKeyDown(e);
+        }
+    };
+    window.addEventListener('keydown', nativeHandler);
+    return () => window.removeEventListener('keydown', nativeHandler);
+  }, [handleGlobalKeyDown, settings.inputSource]);
+
+  // Gamepad Polling Logic - Fixed to dispatch events for SettingsPanel binding
+  const prevButtonsRef = useRef<boolean[]>([]);
+  useEffect(() => {
+      let reqId: number;
+      const pollGamepads = () => {
+          if (settings.inputSource !== 'gamepad') return;
+          
+          const gamepads = navigator.getGamepads();
+          if (gamepads[0]) {
+              const gp = gamepads[0];
+              const buttons = gp.buttons;
+              
+              buttons.forEach((btn, idx) => {
+                  if (btn.pressed && !prevButtonsRef.current[idx]) {
+                      const virtualCode = `Gamepad_${idx}`;
+                      
+                      // CRITICAL FIX: Dispatch a real DOM event so SettingsPanel can catch it for binding
+                      const event = new KeyboardEvent('keydown', {
+                          code: virtualCode,
+                          bubbles: true,
+                          cancelable: true,
+                          view: window
+                      });
+                      window.dispatchEvent(event);
+
+                      // Also call global handler for app logic
+                      handleGlobalKeyDown({ code: virtualCode, preventDefault: () => {} });
+                  }
+              });
+
+              // D-Pad handling
+              if (buttons[14]?.pressed && !prevButtonsRef.current[14]) {
+                  const code = 'Gamepad_14';
+                  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+                  handleGlobalKeyDown({ code, preventDefault: () => {} });
+              }
+              if (buttons[15]?.pressed && !prevButtonsRef.current[15]) {
+                  const code = 'Gamepad_15';
+                  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+                  handleGlobalKeyDown({ code, preventDefault: () => {} });
+              }
+
+              prevButtonsRef.current = buttons.map(b => b.pressed);
+          }
+          reqId = requestAnimationFrame(pollGamepads);
+      };
+      
+      if (settings.inputSource === 'gamepad') {
+          reqId = requestAnimationFrame(pollGamepads);
+      }
+      return () => cancelAnimationFrame(reqId);
+  }, [settings.inputSource, handleGlobalKeyDown]);
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => {
     const file = e.target.files?.[0];
@@ -322,6 +410,12 @@ const App: React.FC = () => {
         safePlay();
       }} className="hidden" />
       
+      {toastMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-indigo-600 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in-up font-bold text-sm flex items-center gap-2">
+            <i className="fa-solid fa-check-circle"></i> {toastMessage}
+        </div>
+      )}
+      
       <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 h-16 shrink-0 z-50 transition-colors duration-300">
          <div className="flex items-center gap-4">
             <button onClick={() => { safePause(); setView('library'); }} className="w-8 h-8 bg-indigo-600 hover:bg-indigo-500 rounded-lg flex items-center justify-center transition-colors"><i className="fa-solid fa-chevron-left text-white text-sm"></i></button>
@@ -385,13 +479,24 @@ const App: React.FC = () => {
                 onWordClick={(word, line, index) => { 
                     setWasPlayingBeforeModal(isPlaying); 
                     safePause(); 
-                    setDictionaryTargetWord(word); 
+                    
+                    // Decide what to put in search box based on Mode
+                    if (settings.dictMode === 'sentence') {
+                        setDictionaryTargetWord(line.text); // Fill full sentence
+                    } else {
+                        setDictionaryTargetWord(word); // Fill specific word
+                    }
+                    
                     setDictionaryTargetIndex(index); 
                     setDictionaryContext(line); 
                     setShowDictionaryModal(true); 
-                    if(settings.copyToClipboard) navigator.clipboard.writeText(word); 
+                    
+                    // Copy depending on mode
+                    if(settings.copyToClipboard) {
+                        navigator.clipboard.writeText(settings.dictMode === 'sentence' ? line.text : word);
+                    }
                 }} 
-                segmentationMode={settings.segmentationMode} 
+                segmentationMode={effectiveSegmentationMode} 
                 onAutoSegment={()=>{}} 
                 isScanning={false} 
                 onShiftTimeline={()=>{}} 
@@ -413,7 +518,7 @@ const App: React.FC = () => {
                         onClick={() => { if(audioRef.current) audioRef.current.currentTime = line.start; setShowFullSubList(false); }}
                         className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${idx === activeSubtitleIndex ? 'bg-indigo-600 text-white shadow-lg' : 'hover:bg-gray-100 dark:hover:bg-white/5 text-slate-500 dark:text-slate-400'}`}
                       >
-                        <span className="text-[9px] opacity-50 font-mono w-12 shrink-0">{(line.start).toFixed(1)}s</span>
+                        <span className="text-[9px] opacity-50 font-mono w-12 shrink-0">{formatTime(line.start)}</span>
                         <span className="text-sm truncate">{line.text || `Segment ${idx}`}</span>
                       </div>
                     ))}
@@ -459,6 +564,8 @@ const App: React.FC = () => {
         ttsSettings={{ enabled: settings.ttsEnabled, rate: settings.ttsRate, pitch: settings.ttsPitch, volume: settings.ttsVolume, voice: settings.ttsVoice }}
         settings={settings}
         setSettings={setSettings}
+        hasDictionaries={hasDictionaries}
+        onAnkiSuccess={() => showToast(t.ankiSuccess)}
       />
       
       <SidePanel 

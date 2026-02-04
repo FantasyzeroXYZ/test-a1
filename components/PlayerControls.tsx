@@ -27,7 +27,9 @@ interface PlayerControlsProps {
   onSaveBookmark: () => void;
   ttsEnabled: boolean;
   onTTSToggle: () => void;
-  onToggleSidePanel: () => void; // New Prop
+  onToggleSidePanel: () => void;
+  showSubtitles?: boolean;
+  onToggleShowSubtitles?: () => void;
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -53,7 +55,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onSaveBookmark,
   ttsEnabled,
   onTTSToggle,
-  onToggleSidePanel
+  onToggleSidePanel,
+  showSubtitles,
+  onToggleShowSubtitles
 }) => {
   const t = getTranslation(language);
   
@@ -96,7 +100,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <select 
             value={playbackRate} 
             onChange={(e) => onRateChange(Number(e.target.value))} 
-            className="bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white text-[10px] md:text-xs font-bold py-1.5 px-2 rounded-lg border border-gray-300 dark:border-slate-600 outline-none cursor-pointer transition-colors"
+            className="w-12 bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white text-[10px] md:text-xs font-bold py-1.5 px-1 rounded-lg border border-gray-300 dark:border-slate-600 outline-none cursor-pointer transition-colors"
             title={t.playbackMode}
           >
               {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => <option key={rate} value={rate}>{rate}x</option>)}
@@ -156,6 +160,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           >
             {abLabel}
           </button>
+          
+          {/* Subtitle Toggle Button */}
+          {onToggleShowSubtitles && (
+            <button 
+              onClick={onToggleShowSubtitles} 
+              className={`h-8 md:h-9 px-3 rounded-lg text-[10px] md:text-xs font-bold transition-all border flex items-center justify-center ${showSubtitles ? 'bg-white dark:bg-slate-700 border-gray-300 dark:border-slate-600 text-slate-600 dark:text-slate-300' : 'bg-gray-100 dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-slate-400 opacity-70'}`}
+              title="Toggle Subtitles"
+            >
+              {showSubtitles ? <i className="fa-solid fa-closed-captioning text-sm"></i> : <i className="fa-regular fa-closed-captioning text-sm"></i>}
+            </button>
+          )}
         </div>
       </div>
     </div>

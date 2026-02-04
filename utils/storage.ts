@@ -2,7 +2,7 @@
 import { AudioTrack, DictionaryEntry, DictionaryResult } from '../types';
 
 const DB_NAME = 'LinguaFlowDB';
-const DB_VERSION = 4; // Upgraded for Tags support
+const DB_VERSION = 5; 
 const STORE_NAME = 'tracks';
 const DICT_STORE_NAME = 'dictionary';
 const DICT_META_STORE_NAME = 'dictionary_meta';
@@ -10,9 +10,10 @@ const DICT_META_STORE_NAME = 'dictionary_meta';
 export interface DictionaryMeta {
   id: string;
   name: string;
-  scope: string; // 'universal' or specific language code
+  type: 'definition' | 'tag'; 
+  scope: string; 
   count: number;
-  priority: number; // Lower value = higher priority (appears first)
+  priority: number; 
   importedAt: number;
 }
 
@@ -20,7 +21,7 @@ export interface LocalDictEntry {
   term: string;
   reading?: string;
   definitions: string[];
-  tags?: string[]; // Added tags
+  tags?: string[]; 
   dictionaryId: string;
 }
 
@@ -44,7 +45,6 @@ export const initDB = (): Promise<IDBDatabase> => {
         dictStore = transaction?.objectStore(DICT_STORE_NAME);
       }
       
-      // V3: Add dictionaryId index if not exists
       if (dictStore && !dictStore.indexNames.contains('dictionaryId')) {
           dictStore.createIndex('dictionaryId', 'dictionaryId', { unique: false });
       }
@@ -181,7 +181,6 @@ export const getDictionaries = async (): Promise<DictionaryMeta[]> => {
     const store = transaction.objectStore(DICT_META_STORE_NAME);
     const request = store.getAll();
     request.onsuccess = () => {
-        // Sort by priority (asc)
         const sorted = (request.result || []).sort((a: DictionaryMeta, b: DictionaryMeta) => a.priority - b.priority);
         resolve(sorted);
     };
@@ -194,10 +193,8 @@ export const deleteDictionary = async (id: string) => {
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction([DICT_STORE_NAME, DICT_META_STORE_NAME], 'readwrite');
     
-    // Delete Meta
     transaction.objectStore(DICT_META_STORE_NAME).delete(id);
 
-    // Delete Entries
     const entryStore = transaction.objectStore(DICT_STORE_NAME);
     const index = entryStore.index('dictionaryId');
     const range = IDBKeyRange.only(id);
@@ -249,14 +246,41 @@ export const saveDictionaryBatch = async (entries: LocalDictEntry[]) => {
   });
 };
 
+export const getLocalTagsForTerm = async (term: string, scope: string): Promise<string[]> => {
+  const db = await initDB();
+  const dictionaries = await getDictionaries();
+  const tagDicts = dictionaries.filter(d => (d.scope === 'universal' || d.scope === scope) && d.type === 'tag');
+  if (tagDicts.length === 0) return [];
+  
+  const tagDictIds = new Set(tagDicts.map(d => d.id));
+
+  return new Promise((resolve, reject) => {
+      const transaction = db.transaction(DICT_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(DICT_STORE_NAME);
+      const index = store.index('term');
+      const request = index.getAll(term);
+      
+      request.onsuccess = () => {
+          const rawResults: LocalDictEntry[] = request.result || [];
+          const tags: string[] = [];
+          
+          rawResults.forEach(entry => {
+              if (tagDictIds.has(entry.dictionaryId)) {
+                  tags.push(...entry.definitions);
+              }
+          });
+          resolve([...new Set(tags)]);
+      };
+      request.onerror = () => resolve([]);
+  });
+};
+
 export const searchLocalDictionary = async (term: string, currentScope: string): Promise<DictionaryResult | null> => {
   const db = await initDB();
   
-  // 1. Get all active dictionaries metadata
   const dictionaries = await getDictionaries();
   if (dictionaries.length === 0) return null;
 
-  // 2. Filter dictionaries by scope
   const activeDicts = dictionaries.filter(d => d.scope === 'universal' || d.scope === currentScope);
   const activeDictIds = new Set(activeDicts.map(d => d.id));
   const dictMap = new Map(activeDicts.map(d => [d.id, d]));
@@ -269,31 +293,55 @@ export const searchLocalDictionary = async (term: string, currentScope: string):
     
     request.onsuccess = () => {
       const rawResults: LocalDictEntry[] = request.result || [];
-      
-      // 3. Filter entries by active dictionary IDs
       const filtered = rawResults.filter(r => r.dictionaryId && activeDictIds.has(r.dictionaryId));
       
       if (filtered.length === 0) {
         resolve(null);
         return;
       }
+
+      const definitionEntries: LocalDictEntry[] = [];
+      const tags: string[] = [];
+
+      filtered.forEach(entry => {
+          const dictMeta = dictMap.get(entry.dictionaryId);
+          if (!dictMeta) return;
+
+          if (dictMeta.type === 'tag') {
+              tags.push(...entry.definitions);
+          } else {
+              definitionEntries.push(entry);
+          }
+      });
       
-      // 4. Sort entries based on dictionary priority
-      filtered.sort((a, b) => {
+      definitionEntries.sort((a, b) => {
           const pA = dictMap.get(a.dictionaryId)?.priority || 9999;
           const pB = dictMap.get(b.dictionaryId)?.priority || 9999;
           return pA - pB;
       });
       
-      // Map to standardized DictionaryResult format
+      if (definitionEntries.length === 0 && tags.length > 0) {
+           const mappedResult: DictionaryResult = {
+            word: term,
+            entries: [{
+                partOfSpeech: 'Tags',
+                pronunciations: [],
+                senses: [{ definition: 'No definition found, only tags available.', examples: [], subsenses: [] }],
+                tags: [...tags]
+            }]
+          };
+          resolve(mappedResult);
+          return;
+      }
+
       const mappedResult: DictionaryResult = {
         word: term,
-        entries: filtered.map(item => ({
+        entries: definitionEntries.map(item => ({
           partOfSpeech: dictMap.get(item.dictionaryId)?.name || 'Dictionary',
           pronunciations: item.reading ? [{ text: item.reading }] : [],
-          tags: item.tags || [],
+          tags: [...(item.tags || []), ...tags],
           senses: [{
-             definition: item.definitions.join('; '),
+             definition: item.definitions.join(''),
              examples: [],
              subsenses: []
           }]
