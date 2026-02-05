@@ -3,7 +3,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>LinguaFlow Player</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -17,6 +17,19 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+      html, body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        /* Ensure background color matches app to prevent white/dark flashes */
+        background-color: #f9fafb; 
+      }
+      .dark body {
+        background-color: #0f172a;
+      }
+      
       /* Custom Scrollbar for Webkit */
       ::-webkit-scrollbar {
         width: 8px;
@@ -61,8 +74,8 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-slate-900 text-white overflow-hidden">
-    <div id="root"></div>
+  <body class="bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-white overflow-hidden">
+    <div id="root" style="height: 100%; width: 100%;"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

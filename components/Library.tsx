@@ -242,13 +242,14 @@ export const Library: React.FC<LibraryProps> = ({
                         <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-400/10`} title="Edit">
                           <i className="fa-solid fa-pencil text-[10px]"></i>
                         </button>
+                        {/* Remove accept attribute here too */}
                         <label onClick={e => e.stopPropagation()} className={`${circleActionBtn} hover:text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-400/10 cursor-pointer`} title={t.importSubs}>
                           <span className="text-[7px] font-black">SUB</span>
-                          <input type="file" accept={SUPPORTED_SUBTITLE_TYPES} className="hidden" onChange={(e) => handleSubFileChange(e, track.id, false)} />
+                          <input type="file" className="hidden" onChange={(e) => handleSubFileChange(e, track.id, false)} />
                         </label>
                         <label onClick={e => e.stopPropagation()} className={`${circleActionBtn} hover:text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-400/10 cursor-pointer`} title={t.importTrans}>
                           <span className="text-[7px] font-black">TR</span>
-                          <input type="file" accept={SUPPORTED_SUBTITLE_TYPES} className="hidden" onChange={(e) => handleSubFileChange(e, track.id, true)} />
+                          <input type="file" className="hidden" onChange={(e) => handleSubFileChange(e, track.id, true)} />
                         </label>
                     </div>
                  </div>

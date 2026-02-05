@@ -97,6 +97,8 @@ export const translations = {
     fieldTrans: "Translation",
     fieldAudio: "Audio",
     fieldExamVocab: "Exam Vocabulary",
+    fieldNotes: "Notes",
+    fieldSource: "Source",
     ankiTags: "Tags",
     interface: "Interface",
     sttSettings: "Speech Recognition",
@@ -187,6 +189,8 @@ export const translations = {
     manageDicts: "Manage Dictionaries",
     dictTypeDefinition: "Definition Dictionaries",
     dictTypeTag: "Tag Dictionaries",
+    exportSettings: "Export User Data",
+    importSettings: "Import User Data",
   },
   zh: {
     appTitle: "LinguaFlow",
@@ -283,6 +287,8 @@ export const translations = {
     fieldTrans: "翻译",
     fieldAudio: "音频",
     fieldExamVocab: "考试词汇",
+    fieldNotes: "笔记",
+    fieldSource: "来源",
     ankiTags: "标签",
     interface: "界面",
     sttSettings: "语音识别",
@@ -373,6 +379,8 @@ export const translations = {
     manageDicts: "管理词典",
     dictTypeDefinition: "释义词典",
     dictTypeTag: "标签词典",
+    exportSettings: "导出用户数据",
+    importSettings: "导入用户数据",
   }
 };
 

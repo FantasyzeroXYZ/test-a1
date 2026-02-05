@@ -5,6 +5,7 @@ import { getTranslation } from '../utils/i18n';
 import * as AnkiService from '../services/ankiService';
 import { clearAllDataFromDB, saveDictionaryBatch, LocalDictEntry, DictionaryMeta, saveDictionaryMeta, getDictionaries, deleteDictionary, updateDictionary } from '../utils/storage';
 import { DEFAULT_KEY_BINDINGS } from '../constants';
+import { downloadFile } from '../utils/parsers';
 
 // Add declaration for external JSZip library
 declare const JSZip: any;
@@ -421,6 +422,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setReaderSettings({...readerSettings, theme});
   };
 
+  // Data Management Functions
+  const handleExportSettings = () => {
+      const data = {
+          settings: readerSettings,
+          ankiSettings: ankiSettings,
+          // We could export more, but tracks are large blobs in IndexedDB. 
+          // Currently exporting just configuration as per typical requirement.
+          // If "user data" implies everything, it's complex due to Blob limits in JSON.
+          // Let's stick to localStorage config export for now as a "Settings Backup".
+      };
+      const json = JSON.stringify(data, null, 2);
+      downloadFile(json, 'linguaflow_settings.json', 'application/json');
+  };
+
+  const handleImportSettings = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+          try {
+              const data = JSON.parse(ev.target?.result as string);
+              if (data.settings) setReaderSettings(data.settings);
+              if (data.ankiSettings) setAnkiSettings(data.ankiSettings);
+              alert(t.importSuccess);
+          } catch (err) {
+              alert(t.importError);
+          }
+      };
+      reader.readAsText(file);
+      e.target.value = ""; // Reset
+  };
+
   // Helper to map internal key names to translation keys
   const getSceneLabel = (scene: string) => {
      switch(scene) {
@@ -463,6 +497,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const currentAnkiFieldMap = ankiConfigMode === 'word' ? ankiSettings.fieldMap : (ankiSettings.sentenceFieldMap as any || {});
   
+  // Define available fields based on mode
+  const availableFields = ankiConfigMode === 'word' 
+      ? ['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab']
+      : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; // New Sentence Mode Fields
+
   const updateAnkiField = (fieldType: string, value: string) => {
       if (ankiConfigMode === 'word') {
           setAnkiSettings({
@@ -842,7 +881,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                            </div>
                            
                            <div className="space-y-2">
-                               {['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab'].map(fieldType => (
+                               {availableFields.map(fieldType => (
                                    <div key={fieldType} className="flex flex-col gap-1">
                                        <span className="text-[10px] text-slate-500 capitalize">{t[`field${fieldType.charAt(0).toUpperCase() + fieldType.slice(1)}` as keyof typeof t] || fieldType}</span>
                                        <select 
@@ -857,7 +896,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                ))}
                            </div>
                            <p className="text-[9px] text-slate-400 mt-2 italic">
-                               {ankiConfigMode === 'sentence' ? "If a field is left empty in Sentence Mode, it will NOT fallback to Word Mode settings." : "These settings are used when Dictionary is in Word Mode or as fallback."}
+                               {ankiConfigMode === 'sentence' ? "Sentence Mode Fields: Sentence, Translation, Audio, Definition, Notes, Source." : "Word Mode Fields: Word, Definition, Sentence, Translation, Audio, Exam Vocab."}
                            </p>
                        </div>
                        
@@ -874,7 +913,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">{t.dataManagement}</span>
           </button>
           {openSections.has('data') && (
-            <div className="p-4 bg-white dark:bg-slate-800/30 transition-colors">
+            <div className="p-4 bg-white dark:bg-slate-800/30 transition-colors space-y-3">
+               <div className="flex gap-2">
+                   <button onClick={handleExportSettings} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1">
+                       <i className="fa-solid fa-download"></i> {t.exportSettings}
+                   </button>
+                   <label className="flex-1 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1 cursor-pointer">
+                       <i className="fa-solid fa-upload"></i> {t.importSettings}
+                       <input type="file" accept=".json" onChange={handleImportSettings} className="hidden" />
+                   </label>
+               </div>
                <button onClick={async () => { if(confirm(t.clearCacheConfirm)) { await clearAllDataFromDB(); location.reload(); } }} className="w-full py-2 bg-red-100 dark:bg-red-600/20 text-red-600 dark:text-red-500 border border-red-200 dark:border-red-500/30 rounded font-bold text-xs transition-colors">{t.clearCache}</button>
             </div>
           )}

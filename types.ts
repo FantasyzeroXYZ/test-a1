@@ -82,6 +82,8 @@ export interface AnkiFieldMap {
   translation: string;
   audio: string;
   examVocab: string;
+  notes?: string;
+  source?: string;
 }
 
 export interface AnkiSettings {

@@ -85,10 +85,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       </div>
 
       {/* Controls Grid */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+      <div className="flex items-center justify-between">
         
         {/* Left: Sidebar, Speed, Subs */}
-        <div className="flex items-center gap-2 justify-start min-w-0 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 justify-start min-w-0 flex-1">
           <button 
              onClick={onToggleSidePanel}
              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-indigo-500 transition-colors"
@@ -117,8 +117,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           )}
         </div>
 
-        {/* Center: Playback Controls (Always Centered) */}
-        <div className="flex items-center gap-1 md:gap-4 justify-center">
+        {/* Center: Playback Controls (Absolute Center) */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 md:gap-4 justify-center">
           {/* Sentence Repeat */}
           <button 
             onClick={onSentenceRepeatToggle} 
@@ -152,7 +152,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         {/* Right: Loop / Extras */}
-        <div className="flex items-center gap-2 justify-end">
+        <div className="flex items-center gap-2 justify-end flex-1">
           <button 
             onClick={onABLoopToggle} 
             className={`h-8 md:h-9 px-3 rounded-lg text-[10px] md:text-xs font-bold transition-all border ${loopA !== null ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-gray-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-gray-100 dark:bg-slate-700/30'}`}
