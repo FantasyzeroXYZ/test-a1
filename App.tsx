@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SUPPORTED_SUBTITLE_TYPES } from './constants';
 import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine } from './types';
@@ -28,6 +27,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   webLinkMode: 'inline',
   copyToClipboard: false,
   dictMode: 'word',
+  dictExportMode: 'anki',
   ttsEnabled: true,
   ttsVoice: '',
   ttsRate: 1,
@@ -92,6 +92,9 @@ const App: React.FC = () => {
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
   const [showFullSubList, setShowFullSubList] = useState(false);
   const [showOffsetControl, setShowOffsetControl] = useState(false);
+
+  // New State: Subtitle Visibility
+  const [showSubtitles, setShowSubtitles] = useState(true);
 
   // Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -404,7 +407,8 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans select-none overflow-hidden transition-colors duration-300">
+    // Fixed layout for iOS/Mobile: 100dvh prevents address bar issues, fixed position fixes scrolling/height collapse
+    <div className="fixed inset-0 h-[100dvh] w-full bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans select-none overflow-hidden transition-colors duration-300 flex flex-col">
       <audio ref={audioRef} src={audioSrc || undefined} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(e) => {
         setDuration(e.currentTarget.duration);
         safePlay();
@@ -500,7 +504,8 @@ const App: React.FC = () => {
                 onAutoSegment={()=>{}} 
                 isScanning={false} 
                 onShiftTimeline={()=>{}} 
-                subtitleMode={settings.subtitleMode} 
+                subtitleMode={settings.subtitleMode}
+                showSubtitles={showSubtitles} 
               />
               
               {/* Full List Overlay controlled by App state now */}
@@ -549,6 +554,8 @@ const App: React.FC = () => {
                 ttsEnabled={settings.ttsEnabled}
                 onTTSToggle={() => setSettings({...settings, ttsEnabled: !settings.ttsEnabled})}
                 onToggleSidePanel={() => setShowSidePanel(prev => !prev)}
+                showSubtitles={showSubtitles}
+                onToggleShowSubtitles={() => setShowSubtitles(prev => !prev)}
               />
            </div>
          )}

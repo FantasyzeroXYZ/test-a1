@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, memo, useMemo, useCallback } from 'react';
 import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, SegmentationMode, WebSearchEngine, AnkiSettings, AudioTrack, ReaderSettings } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -7,6 +6,7 @@ import { lookupWord } from '../services/dictionaryService';
 import { addNote } from '../services/ankiService';
 import { extractAudioClip } from '../utils/audioUtils';
 import { searchLocalDictionary, getLocalTagsForTerm } from '../utils/storage';
+import { downloadFile } from '../utils/parsers';
 
 interface Props {
   isOpen: boolean;
@@ -303,26 +303,7 @@ const DictionaryModal: React.FC<Props> = ({
   // Helper to handle manual source switching without auto-fetching if cached
   const handleSourceSwitch = (newSource: 'api' | 'local') => {
       setDictSource(newSource);
-      // If we switch source and don't have data for that source yet, should we auto-fetch?
-      // User requirement: "won't immediately clear... unless re-click search"
-      // Interpret: If we have data, show it. If we don't, show empty state but don't force clear valid data from OTHER source.
-      // Since we use separate states (apiData, localData), valid data persists in its own state.
-      // We just need to check if the NEW source has data. If not, maybe we fetch? 
-      // User said: "switching... won't clear... keep cache". 
-      // If I switch to Local and localData is null, I probably *should* fetch if it's the first time.
-      // But if I switch back to API and apiData exists, I show apiData.
-      
-      // Implementation: Check if target cache is empty for *current term*. 
-      // If current term matches the term active in that cache? We don't track "term per cache".
-      // We assume cache is for `searchTerm`.
       if (newSource === 'api' && !apiData && !apiLoading) {
-          // If empty, we can either fetch or show blank. 
-          // "Unless re-click search" implies we shouldn't fetch automatically?
-          // But usually switching tabs means "Search this word in Local".
-          // Let's assume automatic fetch on switch IS desired if empty, but NOT clearing if switching back.
-          // Wait, the prompt says "won't immediately clear content". This suggests preserving the *view*.
-          // But if I switch source, the view *must* change to the new source.
-          // Let's implement: Auto-fetch if null. If not null (cached), just show.
           fetchDefinition(searchTerm, newSource);
       } else if (newSource === 'local' && !localData && !localLoading) {
           fetchDefinition(searchTerm, newSource);
@@ -423,57 +404,118 @@ const DictionaryModal: React.FC<Props> = ({
       }).join('<hr/>');
   };
 
-  const handleAddToAnki = async (contentOverride?: string) => {
+  // --- Table Mode Logic ---
+
+  const saveToTable = (entry: any) => {
+    const tableKey = 'lf_vocab_table';
+    const raw = localStorage.getItem(tableKey);
+    const table = raw ? JSON.parse(raw) : [];
+    table.push(entry);
+    localStorage.setItem(tableKey, JSON.stringify(table));
+    alert(language === 'zh' ? "已添加到生词表" : "Added to Vocabulary List");
+  };
+
+  const exportTable = () => {
+     const tableKey = 'lf_vocab_table';
+     const raw = localStorage.getItem(tableKey);
+     const table = raw ? JSON.parse(raw) : [];
+     
+     if (table.length === 0) {
+         alert(language === 'zh' ? "生词表为空" : "List is empty");
+         return;
+     }
+
+     // Convert to CSV
+     // Fields: Word, Definition, Sentence, Translation, Tags, Date
+     const header = ["Word", "Definition", "Sentence", "Translation", "Tags", "Date"];
+     const csvRows = [header.join(',')];
+     
+     table.forEach((row: any) => {
+         const cols = [
+             `"${(row.word || '').replace(/"/g, '""')}"`,
+             `"${(row.definition || '').replace(/"/g, '""')}"`,
+             `"${(row.sentence || '').replace(/"/g, '""')}"`,
+             `"${(row.translation || '').replace(/"/g, '""')}"`,
+             `"${(row.tags || '').replace(/"/g, '""')}"`,
+             `"${new Date(row.date).toLocaleDateString()}"`
+         ];
+         csvRows.push(cols.join(','));
+     });
+     
+     const csvContent = csvRows.join('\n');
+     downloadFile(csvContent, `vocab_list_${new Date().toISOString().slice(0,10)}.csv`, 'text/csv');
+  };
+
+  // --- Main Add Action ---
+
+  const handleAddToAnkiOrTable = async (contentOverride?: string) => {
     if (activeTab === 'custom' && !customDef.trim()) {
-        alert("请输入内容或导入图片/文件后再制卡");
+        alert(language === 'zh' ? "请输入内容" : "Please enter content");
         return;
     }
+
+    let definition = customDef;
+      
+    if (contentOverride) {
+        definition = contentOverride;
+        // Check if override itself is structured JSON
+        try {
+            if (definition.trim().startsWith('{') && definition.includes('"type":"structured-content"')) {
+                const parsed = JSON.parse(definition);
+                definition = structuredContentToHtml(parsed);
+            }
+        } catch(e) {}
+    } else if (activeTab === 'dict' && currentData) {
+        // Use formatter
+        definition = formatAnkiDefinition(currentData);
+    } else if (!customDef && activeTab === 'dict') {
+        // Fallback if no definition found
+        definition = searchTerm;
+    }
+
+    // Common Data
+    const examVocabContent = allHeaderTags.length > 0 ? allHeaderTags.join(' ') : '';
+    const word = searchTerm;
+    const sent = sentence.replace(searchTerm, `<b>${searchTerm}</b>`);
+
+    if (settings.dictExportMode === 'table') {
+        // Table Mode
+        saveToTable({
+            word,
+            definition,
+            sentence: sentence,
+            translation: '', // User usually needs to input this manually or extract from dict if possible, simplified here
+            tags: examVocabContent,
+            date: Date.now()
+        });
+        return;
+    }
+
+    // Anki Mode
     setIsAddingToAnki(true);
     try {
-      let definition = customDef;
-      
-      if (contentOverride) {
-          definition = contentOverride;
-          // Check if override itself is structured JSON
-          try {
-              if (definition.trim().startsWith('{') && definition.includes('"type":"structured-content"')) {
-                  const parsed = JSON.parse(definition);
-                  definition = structuredContentToHtml(parsed);
-              }
-          } catch(e) {}
-      } else if (activeTab === 'dict' && currentData) {
-          // Use formatter
-          definition = formatAnkiDefinition(currentData);
-      }
-      
       let audioBase64 = undefined;
       // Use recording replay method instead of cropping
       if (ankiSettings.fieldMap.audio && currentTrack?.file) {
         audioBase64 = await extractAudioClip(currentTrack.file, contextLine.start, contextLine.end);
       }
 
-      // Collect tags for examVocab field if present
-      const examVocabContent = allHeaderTags.length > 0 ? allHeaderTags.join(' ') : '';
-
       // Fallback logic for sentence mode
       const isSentenceMode = settings.dictMode === 'sentence';
       let effectiveFieldMap = ankiSettings.fieldMap;
       if (isSentenceMode && ankiSettings.sentenceFieldMap && Object.keys(ankiSettings.sentenceFieldMap).length > 0) {
-          // Merge sentence map over default map
           effectiveFieldMap = { ...ankiSettings.fieldMap, ...ankiSettings.sentenceFieldMap };
       }
 
-      // Temporarily swap fieldMap in settings object passed to addNote 
-      // (creating a temporary settings object)
       const tempSettings: AnkiSettings = {
           ...ankiSettings,
           fieldMap: effectiveFieldMap as any
       };
 
       await addNote(tempSettings, {
-        word: searchTerm,
-        definition: definition || searchTerm,
-        sentence: sentence.replace(searchTerm, `<b>${searchTerm}</b>`),
+        word: word,
+        definition: definition || word,
+        sentence: sent,
         translation: '',
         audioBase64,
         examVocab: examVocabContent
@@ -528,9 +570,6 @@ const DictionaryModal: React.FC<Props> = ({
       if (newMode === 'sentence') {
           setSearchTerm(sentence);
           setHighlightRange({start: 0, end: segments.length - 1});
-          // Trigger search immediately for the full sentence
-          // Use setTimeout to ensure state update settles if needed, though usually safe here
-          // But safer to call fetch directly with 'sentence' to avoid closure stale state
           fetchDefinition(sentence, dictSource);
           
           const url = constructWebSearchUrl(currentWebEngine, sentence);
@@ -539,11 +578,14 @@ const DictionaryModal: React.FC<Props> = ({
             setWebHistoryIndex(0);
           }
       } else {
-          // Switch to Word mode: Clear input
           setSearchTerm('');
           setHighlightRange({start: -1, end: -1});
-          // Do not search empty string
       }
+  };
+  
+  const toggleExportMode = () => {
+      const newMode = settings.dictExportMode === 'table' ? 'anki' : 'table';
+      setSettings({...settings, dictExportMode: newMode});
   };
 
   const renderWebOptions = () => {
@@ -612,6 +654,8 @@ const DictionaryModal: React.FC<Props> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
                 <h3 className="font-bold flex items-center gap-2 text-slate-800 dark:text-white text-sm"><i className="fa-solid fa-book text-indigo-500 dark:text-indigo-400"></i> {t.dictClassic}</h3>
+                
+                {/* Dict Mode Toggle */}
                 <button 
                     onClick={toggleDictMode} 
                     className={`ml-2 p-1.5 rounded text-[10px] font-bold uppercase tracking-wide border transition-all ${settings.dictMode === 'sentence' ? 'bg-indigo-100 text-indigo-600 border-indigo-200 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/30' : 'bg-gray-100 text-slate-500 border-gray-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}
@@ -619,8 +663,23 @@ const DictionaryModal: React.FC<Props> = ({
                 >
                     {settings.dictMode === 'sentence' ? (language === 'zh' ? '句子模式' : 'SENTENCE') : (language === 'zh' ? '单词模式' : 'WORD')}
                 </button>
+
+                {/* Export Mode Toggle */}
+                <button 
+                    onClick={toggleExportMode} 
+                    className={`ml-1 p-1.5 rounded text-[10px] font-bold uppercase tracking-wide border transition-all ${settings.dictExportMode === 'table' ? 'bg-emerald-100 text-emerald-600 border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30' : 'bg-blue-100 text-blue-600 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30'}`}
+                    title={settings.dictExportMode === 'table' ? "Table Collection Mode" : "Anki Card Mode"}
+                >
+                    {settings.dictExportMode === 'table' ? (language === 'zh' ? '表格模式' : 'TABLE') : (language === 'zh' ? 'ANKI模式' : 'ANKI')}
+                </button>
             </div>
+            
             <div className="flex items-center gap-2">
+              {settings.dictExportMode === 'table' && (
+                  <button onClick={exportTable} className="p-2 text-emerald-500 hover:text-emerald-600 dark:text-emerald-400 dark:hover:text-emerald-300" title="Export Table">
+                      <i className="fa-solid fa-file-csv"></i>
+                  </button>
+              )}
               <button onClick={() => setIsPinned(!isPinned)} className={`p-2 rounded-full ${isPinned ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-400/10' : 'text-slate-400 hover:text-slate-600 dark:hover:text-white'}`}><i className="fa-solid fa-thumbtack"></i></button>
               <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"><i className="fa-solid fa-xmark"></i></button>
             </div>
@@ -635,8 +694,13 @@ const DictionaryModal: React.FC<Props> = ({
               <button onClick={handleAppendSegment} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white" title={t.appendSegment}><i className="fa-solid fa-plus"></i></button>
               <button onClick={handleCopyFullSentence} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white" title="全句查询"><i className="fa-solid fa-quote-right"></i></button>
               <button onClick={() => handleSearch()} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white"><i className="fa-solid fa-magnifying-glass"></i></button>
-              <button onClick={() => handleAddToAnki()} disabled={isAddingToAnki} className="p-1.5 text-indigo-500 dark:text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 disabled:opacity-50" title={t.saveToAnki}>
-                {isAddingToAnki ? <i className="fa-solid fa-spinner animate-spin"></i> : <i className="fa-solid fa-floppy-disk"></i>}
+              <button 
+                  onClick={() => handleAddToAnkiOrTable()} 
+                  disabled={isAddingToAnki} 
+                  className={`p-1.5 transition-colors disabled:opacity-50 ${settings.dictExportMode === 'table' ? 'text-emerald-500 dark:text-emerald-400 hover:text-emerald-600' : 'text-blue-500 dark:text-blue-400 hover:text-blue-600'}`} 
+                  title={settings.dictExportMode === 'table' ? "Add to Table" : t.saveToAnki}
+              >
+                {isAddingToAnki ? <i className="fa-solid fa-spinner animate-spin"></i> : <i className={`fa-solid ${settings.dictExportMode === 'table' ? 'fa-plus' : 'fa-floppy-disk'}`}></i>}
               </button>
             </div>
           </div>
@@ -726,9 +790,9 @@ const DictionaryModal: React.FC<Props> = ({
                                     {renderDefinitionContent(s.definition)}
                                 </div>
                                 <button 
-                                    onClick={() => handleAddToAnki(s.definition)} 
-                                    className="absolute right-0 top-0 text-slate-300 hover:text-indigo-500 transition-colors opacity-0 group-hover/sense:opacity-100"
-                                    title="Add only this definition to Anki"
+                                    onClick={() => handleAddToAnkiOrTable(s.definition)} 
+                                    className={`absolute right-0 top-0 transition-colors opacity-0 group-hover/sense:opacity-100 ${settings.dictExportMode === 'table' ? 'text-emerald-300 hover:text-emerald-500' : 'text-slate-300 hover:text-indigo-500'}`}
+                                    title={settings.dictExportMode === 'table' ? "Add to Table" : "Add to Anki"}
                                 >
                                     <i className="fa-solid fa-plus-circle"></i>
                                 </button>
@@ -786,50 +850,56 @@ const DictionaryModal: React.FC<Props> = ({
                     </select>
                   </div>
                   
-                  <button onClick={toggleLinkMode} className={`ml-auto w-7 h-7 flex items-center justify-center rounded shrink-0 ${settings.webLinkMode === 'external' ? 'text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10' : 'text-slate-400 hover:text-slate-600'}`} title={settings.webLinkMode === 'external' ? 'External Browser' : 'Embedded View'}>
-                      <i className={`fa-solid ${settings.webLinkMode === 'external' ? 'fa-up-right-from-square' : 'fa-window-maximize'} text-[10px]`}></i>
+                  <button onClick={toggleLinkMode} className={`ml-auto w-7 h-7 flex items-center justify-center rounded shrink-0 ${settings.webLinkMode === 'inline' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`} title={settings.webLinkMode === 'inline' ? "Inline" : "External"}>
+                      <i className={`fa-solid ${settings.webLinkMode === 'inline' ? 'fa-up-right-from-square' : 'fa-arrow-up-right-from-square'} text-[10px]`}></i>
                   </button>
-
-                  <button onClick={() => setShowWebCustomDef(!showWebCustomDef)} className={`w-7 h-7 flex items-center justify-center rounded shrink-0 ${showWebCustomDef ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}><i className="fa-solid fa-pen-to-square text-[10px]"></i></button>
               </div>
-              
-              {settings.webLinkMode === 'external' ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4 bg-gray-50 dark:bg-slate-900">
-                      <i className="fa-solid fa-up-right-from-square text-4xl opacity-30"></i>
-                      <p className="text-xs">Opening in external browser...</p>
-                  </div>
-              ) : (
-                  <iframe ref={iframeRef} src={currentWebUrl} className="flex-1 w-full border-0 bg-white" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" />
-              )}
-              
-              {showWebCustomDef && (
-                <div className="p-3 border-t border-gray-200 dark:border-slate-700 bg-white/95 dark:bg-slate-800/95 absolute bottom-0 left-0 right-0 z-10 flex flex-col gap-2 shadow-[0_-5px_15px_rgba(0,0,0,0.1)]">
-                   <div className="flex items-center justify-between">
-                       <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t.webCustomNotes}</h4>
-                       <div className="flex items-center gap-2">
-                           <label className="text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 cursor-pointer text-sm" title="导入图片"><i className="fa-solid fa-image"></i><input type="file" accept="image/*" className="hidden" /></label>
-                           <label className="text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 cursor-pointer text-sm" title="导入文本"><i className="fa-solid fa-file-lines"></i><input type="file" accept=".txt,.md" className="hidden" /></label>
+
+              <div className="flex-1 relative bg-gray-100 dark:bg-black">
+                   {/* Iframe or Placeholder */}
+                   {settings.webLinkMode === 'inline' ? (
+                       <iframe 
+                           ref={iframeRef}
+                           src={currentWebUrl} 
+                           className="w-full h-full border-none bg-white" 
+                           title="Web Search"
+                           sandbox="allow-same-origin allow-scripts allow-forms"
+                       />
+                   ) : (
+                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4 p-8 text-center">
+                           <i className="fa-solid fa-arrow-up-right-from-square text-4xl opacity-30"></i>
+                           <p className="text-xs">Results opened in external browser.</p>
+                           <button onClick={() => navigateToUrl(currentWebUrl)} className="px-4 py-2 bg-indigo-600 text-white rounded text-xs font-bold">Open Again</button>
                        </div>
-                   </div>
-                   <textarea value={customDef} onChange={(e) => setCustomDef(e.target.value)} className="w-full bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-white outline-none h-20 resize-none" placeholder={t.dictCustomPlaceholder} />
-                </div>
-              )}
+                   )}
+              </div>
           </div>
 
           <div className={`h-full flex flex-col ${activeTab === 'custom' ? 'block' : 'hidden'}`}>
-              <div className="p-2 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between bg-gray-50 dark:bg-slate-800/30 transition-colors">
-                  <div className="flex items-center gap-3 px-2">
-                      <button onClick={toggleClipboard} className={`text-sm ${settings.copyToClipboard ? 'text-indigo-500 dark:text-indigo-400' : 'text-slate-500'}`} title={t.clipboardMode}><i className="fa-solid fa-paste"></i></button>
-                      <label className="text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 cursor-pointer text-sm" title="导入图片"><i className="fa-solid fa-image"></i><input type="file" accept="image/*" className="hidden" /></label>
-                      <label className="text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 cursor-pointer text-sm" title="导入文本"><i className="fa-solid fa-file-lines"></i><input type="file" accept=".txt,.md" className="hidden" /></label>
-                  </div>
-                  <button onClick={() => setCustomDef('')} className="text-slate-500 hover:text-slate-800 dark:hover:text-white text-xs px-2"><i className="fa-solid fa-eraser"></i></button>
-              </div>
-              <textarea value={customDef} onChange={(e) => setCustomDef(e.target.value)} className="flex-1 w-full bg-white dark:bg-slate-800/20 border-0 p-4 text-slate-800 dark:text-white text-sm outline-none resize-none transition-colors" placeholder={t.dictCustomPlaceholder} />
+             <div className="flex-1 p-4 flex flex-col gap-4">
+                 <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 p-3 rounded-lg text-xs text-amber-800 dark:text-amber-200">
+                     <i className="fa-solid fa-lightbulb mr-2"></i>
+                     {t.dictOverride}
+                 </div>
+                 <textarea 
+                    value={customDef}
+                    onChange={(e) => setCustomDef(e.target.value)}
+                    className="flex-1 w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-xl p-4 text-slate-800 dark:text-white focus:border-indigo-500 outline-none resize-none text-sm transition-colors"
+                    placeholder={t.dictCustomPlaceholder}
+                 />
+                 <button 
+                    onClick={() => handleAddToAnkiOrTable()}
+                    disabled={isAddingToAnki || !customDef.trim()}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50 active:scale-95"
+                 >
+                    {isAddingToAnki ? <i className="fa-solid fa-spinner animate-spin"></i> : t.saveToAnki}
+                 </button>
+             </div>
           </div>
         </div>
       </div>
     </>
   );
 };
-export default DictionaryModal;
+
+export default memo(DictionaryModal);

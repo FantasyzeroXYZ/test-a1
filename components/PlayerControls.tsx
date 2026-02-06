@@ -149,6 +149,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <button onClick={onForward} className={controlBtnClass} title={t.keyForward}>
             <svg className="w-5 h-5 md:w-7 md:h-7" fill="currentColor" viewBox="0 0 20 20"><path d="M4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4zM11.555 5.168A1 1 0 0010 6v8a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4z" /></svg>
           </button>
+
+          {/* Subtitle Toggle Button (Moved here for symmetry and requested placement) */}
+          {onToggleShowSubtitles && (
+            <button 
+              onClick={onToggleShowSubtitles} 
+              className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all ${showSubtitles ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}
+              title="Toggle Subtitles"
+            >
+              {showSubtitles ? <i className="fa-solid fa-closed-captioning text-sm md:text-base"></i> : <i className="fa-regular fa-closed-captioning text-sm md:text-base"></i>}
+            </button>
+          )}
         </div>
 
         {/* Right: Loop / Extras */}
@@ -160,17 +171,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           >
             {abLabel}
           </button>
-          
-          {/* Subtitle Toggle Button */}
-          {onToggleShowSubtitles && (
-            <button 
-              onClick={onToggleShowSubtitles} 
-              className={`h-8 md:h-9 px-3 rounded-lg text-[10px] md:text-xs font-bold transition-all border flex items-center justify-center ${showSubtitles ? 'bg-white dark:bg-slate-700 border-gray-300 dark:border-slate-600 text-slate-600 dark:text-slate-300' : 'bg-gray-100 dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-slate-400 opacity-70'}`}
-              title="Toggle Subtitles"
-            >
-              {showSubtitles ? <i className="fa-solid fa-closed-captioning text-sm"></i> : <i className="fa-regular fa-closed-captioning text-sm"></i>}
-            </button>
-          )}
         </div>
       </div>
     </div>

@@ -124,6 +124,7 @@ export interface ReaderSettings {
   webLinkMode: WebLinkMode;
   copyToClipboard: boolean;
   dictMode: 'word' | 'sentence'; // Controls initial search behavior
+  dictExportMode: 'anki' | 'table'; // New: Controls export destination
   ttsEnabled: boolean;
   ttsVoice: string;
   ttsRate: number;

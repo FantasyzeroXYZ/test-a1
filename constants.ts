@@ -5,7 +5,7 @@ export const SUPPORTED_AUDIO_TYPES = "audio/*,.m4b,.mp3,.m4a,.wav,.aac,.flac,.og
 
 // Add text mime types for iOS compatibility with subtitle files
 // Added .txt and explicit text types to improve selection capability on iOS
-export const SUPPORTED_SUBTITLE_TYPES = ".srt,.lrc,.vtt,.ass,.txt,text/plain,text/vtt,application/x-subrip,text/srt,application/octet-stream,text/x-vtt";
+export const SUPPORTED_SUBTITLE_TYPES = ".srt,.lrc,.vtt,.ass,.txt,text/plain,text/vtt,application/x-subrip,text/srt,application/octet-stream,text/x-vtt,application/json,text/*";
 
 // Mock data if needed, but we rely on file uploads
 export const MOCK_SUBTITLES = [];
