@@ -204,7 +204,7 @@ export const Library: React.FC<LibraryProps> = ({
              </button>
              <label className="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl shadow-xl shadow-indigo-600/20 cursor-pointer flex items-center justify-center transition-all active:scale-90">
                 <i className="fa-solid fa-plus text-xs"></i>
-                <input type="file" accept={SUPPORTED_AUDIO_TYPES} className="hidden" onChange={(e) => handleImportWrapper(e, activeTab)} />
+                <input type="file" accept=".mp3,.m4b,.m4a,audio/*" className="hidden" onChange={(e) => handleImportWrapper(e, activeTab)} />
              </label>
          </div>
       </div>
@@ -420,7 +420,7 @@ export const Library: React.FC<LibraryProps> = ({
                           <label className="w-full py-2.5 bg-gray-200 dark:bg-slate-700 hover:bg-gray-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
                              <i className="fa-solid fa-rotate"></i>
                              重新关联音频文件
-                             <input type="file" accept={SUPPORTED_AUDIO_TYPES} className="hidden" onChange={handleFileReplace} />
+                             <input type="file" accept=".mp3,.m4b,.m4a,audio/*" className="hidden" onChange={handleFileReplace} />
                           </label>
                        </div>
                    ) : (

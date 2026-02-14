@@ -353,3 +353,15 @@ export const searchLocalDictionary = async (term: string, currentScope: string):
     request.onerror = () => reject(request.error);
   });
 };
+
+/**
+ * Batch search for terms (for Yomitan mode de-inflection/scanning)
+ */
+export const batchSearchTerms = async (terms: string[], currentScope: string): Promise<DictionaryResult[]> => {
+    if (terms.length === 0) return [];
+    
+    // Use parallel individual searches for now as IDB key range for discrete set is hard
+    // Optimisation: We could open one transaction and reuse it
+    const results = await Promise.all(terms.map(term => searchLocalDictionary(term, currentScope)));
+    return results.filter((r): r is DictionaryResult => r !== null);
+};

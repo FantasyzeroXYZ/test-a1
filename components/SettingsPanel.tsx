@@ -38,7 +38,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen, onClose, language, setLanguage, learningLanguage, setLearningLanguage, subtitleMode, setSubtitleMode, subtitleFontSize, setSubtitleFontSize, readerSettings, setReaderSettings, ankiSettings, setAnkiSettings, segmentationMode, setSegmentationMode, webSearchEngine, setWebSearchEngine
 }) => {
   const t = getTranslation(language);
-  const [openSections, setOpenSections] = useState<Set<string>>(new Set()); // Default collapsed
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set()); 
   const [shortcutScene, setShortcutScene] = useState<keyof SceneKeybindings>('player');
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [ttsTestText, setTTSTestText] = useState('');
@@ -55,7 +55,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // Dictionary Management State
   const [viewDictType, setViewDictType] = useState<DictImportType>('definition');
-  const [viewDictLang, setViewDictLang] = useState<string>('all'); // New Language Filter
+  const [viewDictLang, setViewDictLang] = useState<string>('all'); 
 
   // Keybinding State
   const [isKeyBindingActive, setIsKeyBindingActive] = useState(false);
@@ -90,14 +90,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     if (isOpen) {
         refreshDictionaries();
-        // Reset keybinding temp state
         setTempKeybindings(readerSettings.keybindings);
         setIsKeyBindingActive(false);
         setBindingKeyTarget(null);
     }
   }, [isOpen, readerSettings.keybindings]);
 
-  // Fetch Anki Fields when model changes
   useEffect(() => {
       if (ankiConnected && ankiSettings.modelName) {
           AnkiService.getModelFieldNames(ankiSettings, ankiSettings.modelName)
@@ -136,8 +134,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setOpenSections(newSections);
   };
 
-  // --- Keybinding Logic ---
-  
   const updateTempBinding = (target: string, code: string) => {
       const [scene, action] = target.split('-');
       setTempKeybindings(prev => ({
@@ -151,7 +147,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleKeybindKeyDown = (e: KeyboardEvent) => {
       if (!isKeyBindingActive || !bindingKeyTarget) return;
-      // Allow Escape to cancel binding
       if (e.code === 'Escape') {
           e.preventDefault();
           setBindingKeyTarget(null);
@@ -167,7 +162,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   useEffect(() => {
       if (isKeyBindingActive) {
-          window.addEventListener('keydown', handleKeybindKeyDown, { capture: true }); // Capture to prevent app actions
+          window.addEventListener('keydown', handleKeybindKeyDown, { capture: true });
           return () => window.removeEventListener('keydown', handleKeybindKeyDown, { capture: true });
       }
   }, [isKeyBindingActive, bindingKeyTarget]);
@@ -206,8 +201,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       }
   };
 
-  // --- End Keybinding Logic ---
-
   const handleYomitanImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -224,7 +217,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         const zip = await JSZip.loadAsync(file);
         let dictTitle = file.name;
         
-        // Try to read index.json for title
         if (zip.file('index.json')) {
             const indexText = await zip.file('index.json').async('string');
             try {
@@ -238,12 +230,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         const batchSize = 2000;
         let totalCount = 0;
         
-        // Define file pattern based on type
-        // Definition: term_bank_*.json
-        // Tag: term_meta_bank_*.json
         const filePattern = dictImportType === 'definition' ? 'term_bank' : 'term_meta_bank';
-        
-        // Iterate through files
         const files = Object.keys(zip.files).filter(f => f.includes(filePattern) && f.endsWith('.json'));
         
         if (files.length === 0) {
@@ -259,24 +246,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             const content = await zip.file(fileName).async('string');
             const data = JSON.parse(content);
             
-            // Yomitan term bank format: [term, reading, definition_tags, rules, score, [glossary], sequence, term_tags]
-            // Yomitan meta bank format: [term, mode, data]
-            
             for (const item of data) {
                 if (!Array.isArray(item)) continue;
                 
                 if (dictImportType === 'definition') {
                     const term = item[0];
                     const reading = item[1];
-                    const glossary = item[5]; // can be array of strings or objects
-                    const tagsData = item[7] || ''; // term_tags is at index 7, typically space separated string or empty
+                    const glossary = item[5]; 
+                    const tagsData = item[7] || ''; 
                     const tags = typeof tagsData === 'string' && tagsData ? tagsData.split(' ') : [];
                     
                     let definitions: string[] = [];
                     if (Array.isArray(glossary)) {
                         definitions = glossary.map((g: any) => {
                             if (typeof g === 'string') return g;
-                            if (g && g.content) return JSON.stringify(g); // Structured content
+                            if (g && g.content) return JSON.stringify(g); 
                             return JSON.stringify(g);
                         });
                     }
@@ -289,14 +273,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         dictionaryId: dictionaryId
                     });
                 } else {
-                    // Tag Dictionary Import
-                    // Format: [term, mode, data]
                     const term = item[0];
                     const mode = item[1];
                     const metaData = item[2];
-                    
-                    // We only process 'freq' for now as requested, but we can be broader
-                    // User Example: ["相", "freq", {"reading": "あい", "frequency": {"value": -1, "displayValue": "N1"}}]
                     
                     let tagValue = '';
                     if (mode === 'freq' && metaData && metaData.frequency) {
@@ -310,7 +289,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     if (tagValue) {
                         entries.push({
                             term,
-                            definitions: [String(tagValue)], // Reuse definitions field to store tag value
+                            definitions: [String(tagValue)],
                             dictionaryId: dictionaryId
                         });
                     }
@@ -320,21 +299,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 
                 if (entries.length >= batchSize) {
                    await saveDictionaryBatch(entries);
-                   entries.length = 0; // clear array
+                   entries.length = 0; 
                 }
             }
         }
         
-        // Save remaining
         if (entries.length > 0) {
             await saveDictionaryBatch(entries);
         }
 
-        // Save Metadata
         await saveDictionaryMeta({
             id: dictionaryId,
             name: dictTitle,
-            type: dictImportType, // Save type
+            type: dictImportType, 
             scope: dictImportScope,
             count: totalCount,
             priority: Date.now(),
@@ -362,10 +339,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handleMoveDictionary = async (index: number, direction: 'up' | 'down') => {
-      // Need to filter list first to get correct index relative to all dictionaries
-      // But we are sorting in display.
-      // Simplest: Find actual items in full list and swap priorities
-      
       const filtered = dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang));
       if (index < 0 || index >= filtered.length) return;
 
@@ -377,7 +350,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       
       if (!swapItem) return;
 
-      // Swap priorities
       const tempP = currentItem.priority;
       currentItem.priority = swapItem.priority;
       swapItem.priority = tempP;
@@ -422,15 +394,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setReaderSettings({...readerSettings, theme});
   };
 
-  // Data Management Functions
   const handleExportSettings = () => {
       const data = {
           settings: readerSettings,
           ankiSettings: ankiSettings,
-          // We could export more, but tracks are large blobs in IndexedDB. 
-          // Currently exporting just configuration as per typical requirement.
-          // If "user data" implies everything, it's complex due to Blob limits in JSON.
-          // Let's stick to localStorage config export for now as a "Settings Backup".
       };
       const json = JSON.stringify(data, null, 2);
       downloadFile(json, 'linguaflow_settings.json', 'application/json');
@@ -452,10 +419,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           }
       };
       reader.readAsText(file);
-      e.target.value = ""; // Reset
+      e.target.value = ""; 
   };
 
-  // Helper to map internal key names to translation keys
   const getSceneLabel = (scene: string) => {
      switch(scene) {
          case 'library': return t.scLibrary;
@@ -465,7 +431,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
      }
   };
 
-  // Helper to map shortcut action keys to translation keys
   const getActionLabel = (key: string) => {
       const map: Record<string, string> = {
           'playPause': t.keyPlayPause,
@@ -497,10 +462,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const currentAnkiFieldMap = ankiConfigMode === 'word' ? ankiSettings.fieldMap : (ankiSettings.sentenceFieldMap as any || {});
   
-  // Define available fields based on mode
   const availableFields = ankiConfigMode === 'word' 
       ? ['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab']
-      : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; // New Sentence Mode Fields
+      : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; 
 
   const updateAnkiField = (fieldType: string, value: string) => {
       if (ankiConfigMode === 'word') {
@@ -549,7 +513,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <select value={language} onChange={(e) => setLanguage(e.target.value as Language)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="zh">{t.langZh}</option><option value="zh-TW">繁体中文</option><option value="en">{t.langEn}</option></select>
                </div>
                
-               {/* Web Search Settings Split */}
                <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.searchCategory}</label>
                   <select value={searchCategory} onChange={(e) => setSearchCategory(e.target.value as WebSearchCategory)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none mb-2 transition-colors">
@@ -609,6 +572,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                </div>
                
+               {/* Toggle for Instant Lookup (Yomitan Mode) */}
+               <div className="flex items-center justify-between pb-2 border-b border-gray-200 dark:border-slate-700">
+                  <div className="flex flex-col">
+                      <span className="text-sm text-slate-700 dark:text-slate-300 font-bold">Instant Lookup (Yomitan Mode)</span>
+                      <span className="text-[10px] text-slate-500">Scan text on click without segmentation</span>
+                  </div>
+                  <input type="checkbox" checked={readerSettings.yomitanMode} onChange={e => setReaderSettings({...readerSettings, yomitanMode: e.target.checked})} className="accent-indigo-600" />
+               </div>
+
                {/* Management Section */}
                <div>
                    <div className="flex justify-between items-center mb-2 gap-2">
@@ -746,13 +718,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 )}
             </div>
           )}
-
+          
           <button onClick={() => toggleSection('shortcuts')} className="w-full flex items-center justify-between p-4 bg-gray-50/50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-700/50 border-b border-gray-200 dark:border-slate-700/50 text-left transition-colors">
             <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">{t.shortcuts}</span>
           </button>
           {openSections.has('shortcuts') && (
             <div className="p-4 bg-white dark:bg-slate-800/30 space-y-4 transition-colors">
-              {/* Controls */}
               <div className="flex justify-between items-center mb-4">
                   <div className="flex bg-gray-100 dark:bg-slate-900 rounded p-1 border border-gray-200 dark:border-slate-700">
                       <button 
@@ -787,15 +758,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                        )}
                   </div>
               </div>
-
-              {/* Tabs */}
               <div className="flex bg-gray-100 dark:bg-slate-900 rounded p-1 border border-gray-200 dark:border-slate-700 transition-colors">
                 {(['library', 'player', 'dictionary'] as const).map(scene => (
                   <button key={scene} onClick={() => setShortcutScene(scene)} className={`flex-1 py-1 text-[10px] rounded transition-all ${shortcutScene === scene ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}`}>{getSceneLabel(scene)}</button>
                 ))}
               </div>
-
-              {/* List */}
               <div className="space-y-3">
                 {Object.keys(readerSettings.keybindings[shortcutScene]).map(key => {
                   const isMappingThis = bindingKeyTarget === `${shortcutScene}-${key}`;
@@ -844,6 +811,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiPort}</label>
                   <input type="number" placeholder="8765" value={ankiSettings.port} onChange={(e) => setAnkiSettings({...ankiSettings, port: parseInt(e.target.value)})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-sm transition-colors" />
                </div>
+               
+               {/* New Toggle for Bolding */}
+               <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Bold Target Word</span>
+                  <input type="checkbox" checked={readerSettings.ankiBoldWord} onChange={e => setReaderSettings({...readerSettings, ankiBoldWord: e.target.checked})} className="accent-indigo-600" />
+               </div>
+
                <button onClick={checkAnkiConnection} className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold text-xs shadow-md transition-all">{t.ankiTest}</button>
 
                {ankiConnected && (

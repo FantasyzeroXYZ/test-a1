@@ -125,6 +125,8 @@ export interface ReaderSettings {
   copyToClipboard: boolean;
   dictMode: 'word' | 'sentence'; // Controls initial search behavior
   dictExportMode: 'anki' | 'table'; // New: Controls export destination
+  ankiBoldWord: boolean; // New: Controls if target word is bolded in sentence
+  yomitanMode: boolean; // New: Yomitan-style instant lookup
   ttsEnabled: boolean;
   ttsVoice: string;
   ttsRate: number;
@@ -132,4 +134,16 @@ export interface ReaderSettings {
   ttsVolume: number;
   keybindings: SceneKeybindings;
   inputSource: InputSource; // Added for gamepad/keyboard switching
+}
+
+export interface TableEntry {
+    id: string;
+    word: string;
+    definition: string;
+    sentence: string;
+    translation: string;
+    tags: string;
+    sourceTitle: string;
+    timeRange: string;
+    addedAt: number;
 }

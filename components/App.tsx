@@ -1,11 +1,10 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SUPPORTED_SUBTITLE_TYPES } from './constants';
-import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine } from './types';
+import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine, DictionaryResult, DictionaryEntry } from './types';
 import { getTranslation } from './utils/i18n';
 import { parseChapters } from './utils/chapterUtils';
 import { parseSRT, parseLRC, parseVTT, parseASS, formatTime } from './utils/parsers';
-import { saveTrackToDB, getAllTracksFromDB, deleteTrackFromDB, updateTrackMetadataInDB, getDictionaries } from './utils/storage';
+import { saveTrackToDB, getAllTracksFromDB, deleteTrackFromDB, updateTrackMetadataInDB, getDictionaries, batchSearchTerms } from './utils/storage';
 import { detectAudioSegments } from './utils/audioSegmenter';
 import * as AnkiService from './services/ankiService';
 import { PlayerControls } from './components/PlayerControls';
@@ -15,6 +14,10 @@ import { Library } from './components/Library';
 import { SidePanel } from './components/SidePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { BookmarkModal } from './components/BookmarkModal';
+import { VocabListModal } from './components/VocabListModal';
+import { YomitanPopup } from './components/YomitanPopup';
+import { isNonSpacedLang } from './utils/textUtils';
+import { deinflect, DeinflectionResult } from './utils/deinflector';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   theme: 'light',
@@ -28,6 +31,9 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   webLinkMode: 'inline',
   copyToClipboard: false,
   dictMode: 'word',
+  dictExportMode: 'anki',
+  ankiBoldWord: true,
+  yomitanMode: false,
   ttsEnabled: true,
   ttsVoice: '',
   ttsRate: 1,
@@ -58,6 +64,46 @@ const findSubtitleIndex = (subtitles: SubtitleLine[], time: number): number => {
     else low = mid + 1;
   }
   return -1;
+};
+
+const formatContentPlain = (content: any, depth: number = 0): string => {
+    if (content === null || content === undefined) return '';
+    if (Array.isArray(content)) return content.map(child => formatContentPlain(child, depth)).join('');
+    if (typeof content === 'string') return content;
+    if (typeof content === 'object') {
+        if (content.type === 'structured-content' && content.content) return formatContentPlain(content.content, depth);
+        const tag = content.tag;
+        const inner = formatContentPlain(content.content, depth + 1);
+        if (tag === 'li') return `\n${'  '.repeat(depth)}- ${inner}`;
+        if (tag === 'div' || tag === 'p') return `\n${inner}`;
+        if (tag === 'br') return '\n';
+        return inner;
+    }
+    return '';
+};
+
+const formatDefinitionForExport = (dictData: DictionaryResult): string => {
+    if (!dictData.entries || dictData.entries.length === 0) return dictData.word;
+    let text = "";
+    dictData.entries.forEach((entry, idx) => {
+        if (idx > 0) text += "\n\n";
+        text += `[${entry.partOfSpeech}]\n`;
+        entry.senses.forEach((s, sIdx) => {
+            let defContent = s.definition;
+            try {
+                if (typeof defContent === 'string' && defContent.trim().startsWith('{') && defContent.includes('"type":"structured-content"')) {
+                    const parsed = JSON.parse(defContent);
+                    defContent = formatContentPlain(parsed);
+                }
+            } catch (e) {}
+            text += `${sIdx + 1}. ${defContent}\n`;
+        });
+    });
+    return text.trim();
+};
+
+const isJapanese = (text: string) => {
+    return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/.test(text);
 };
 
 const App: React.FC = () => {
@@ -92,6 +138,7 @@ const App: React.FC = () => {
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
   const [showFullSubList, setShowFullSubList] = useState(false);
   const [showOffsetControl, setShowOffsetControl] = useState(false);
+  const [showVocabTable, setShowVocabTable] = useState(false);
 
   // New State: Subtitle Visibility
   const [showSubtitles, setShowSubtitles] = useState(true);
@@ -111,6 +158,27 @@ const App: React.FC = () => {
   const [wasPlayingBeforeModal, setWasPlayingBeforeModal] = useState(false);
   const [hasDictionaries, setHasDictionaries] = useState(false);
 
+  // Yomitan Popup State
+  const [yomitanPopup, setYomitanPopup] = useState<{ 
+      visible: boolean; 
+      x: number; 
+      y: number; 
+      result?: DictionaryResult;
+      allResults?: DictionaryResult[]; 
+      highlight?: { lineId: string; start: number; length: number }; 
+      originalStartIndex?: number; 
+      pinned?: boolean;
+      originalText?: string; 
+      deinflectionReason?: string;
+  } | null>(null);
+
+  // Ref to track pinned state without triggering re-renders in callbacks
+  const yomitanPinnedRef = useRef(false);
+
+  useEffect(() => {
+      yomitanPinnedRef.current = !!yomitanPopup?.pinned;
+  }, [yomitanPopup?.pinned]);
+
   const currentTrack = useMemo(() => audioTracks.find(t => t.id === currentTrackId), [audioTracks, currentTrackId]);
   const currentDisplaySubtitles = useMemo(() => activeSubtitleType === 'primary' ? subtitles : secondarySubtitles, [activeSubtitleType, subtitles, secondarySubtitles]);
 
@@ -125,16 +193,14 @@ const App: React.FC = () => {
   // Check if dictionaries exist for empty state UI
   useEffect(() => {
     getDictionaries().then(dicts => setHasDictionaries(dicts.length > 0));
-  }, [showDictionaryModal, showSettings]); // Refresh when settings close (might have added/deleted dicts)
+  }, [showDictionaryModal, showSettings]); 
 
-  // FIXED: Wrapped setAudioTracks in an arrow function to avoid potential second argument from Promise resolution
   useEffect(() => { 
     getAllTracksFromDB().then(tracks => setAudioTracks(tracks)); 
   }, []);
 
   // Theme application effect
   useEffect(() => {
-    // Force remove first to ensure clean state
     document.documentElement.classList.remove('dark');
     if (settings.theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -160,7 +226,6 @@ const App: React.FC = () => {
     if (!audioRef.current) return;
     const currTime = audioRef.current.currentTime;
 
-    // Logic: If before first subtitle, jump to start of first subtitle
     if (currentDisplaySubtitles.length > 0) {
         if (currTime < currentDisplaySubtitles[0].start) {
             audioRef.current.currentTime = currentDisplaySubtitles[0].start;
@@ -168,7 +233,6 @@ const App: React.FC = () => {
         }
     }
 
-    // Standard next sentence logic
     if (activeSubtitleIndex < currentDisplaySubtitles.length - 1) {
         audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex + 1].start;
     }
@@ -179,22 +243,25 @@ const App: React.FC = () => {
       if (activeSubtitleIndex > 0) {
           audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex - 1].start;
       } else if (currentDisplaySubtitles.length > 0) {
-          // If at first subtitle or before, reset to 0 or start of first
           audioRef.current.currentTime = currentDisplaySubtitles[0].start;
       }
   }, [currentDisplaySubtitles, activeSubtitleIndex]);
 
   const handleGlobalKeyDown = useCallback((e: KeyboardEvent | { code: string, preventDefault: () => void }) => {
-    // This handler can accept a synthetic event object for gamepad support
-    
-    if (showSettings) return; // Disable shortcuts if settings panel is open
-    // Only check target tagName if it's a real keyboard event
+    if (showSettings) return; 
     if ('target' in e && ['INPUT', 'TEXTAREA'].includes(((e as KeyboardEvent).target as HTMLElement).tagName)) return;
 
     if (showDictionaryModal) {
       const kb = settings.keybindings.dictionary;
       if (e.code === kb.close) { e.preventDefault(); setShowDictionaryModal(false); if (wasPlayingBeforeModal) safePlay(); }
       return;
+    }
+
+    if (yomitanPopup?.visible) {
+        if (e.code === 'Escape') {
+            setYomitanPopup(null);
+            return;
+        }
     }
 
     if (view === 'player') {
@@ -205,11 +272,10 @@ const App: React.FC = () => {
       if (e.code === kb.sidebar) { e.preventDefault(); setShowSidePanel(prev => !prev); }
       if (e.code === kb.dict) { e.preventDefault(); if (activeSubtitleIndex !== -1) { 
         const line = currentDisplaySubtitles[activeSubtitleIndex];
-        // For shortcut dictionary opening, respect mode
         if (settings.dictMode === 'sentence') {
             setDictionaryTargetWord(line.text);
         } else {
-            setDictionaryTargetWord(line.text.split(' ')[0] || ''); // Fallback to first word or empty
+            setDictionaryTargetWord(line.text.split(' ')[0] || '');
         }
         setDictionaryTargetIndex(0);
         setWasPlayingBeforeModal(isPlaying);
@@ -221,10 +287,9 @@ const App: React.FC = () => {
         const kb = settings.keybindings.library;
         if (e.code === kb.settings) { e.preventDefault(); setShowSettings(true); }
     }
-  }, [view, showDictionaryModal, showSettings, settings, isPlaying, safePlay, safePause, activeSubtitleIndex, currentDisplaySubtitles, wasPlayingBeforeModal, handleForward, handleRewind]);
+  }, [view, showDictionaryModal, showSettings, settings, isPlaying, safePlay, safePause, activeSubtitleIndex, currentDisplaySubtitles, wasPlayingBeforeModal, handleForward, handleRewind, yomitanPopup]);
 
   useEffect(() => {
-    // Native Keyboard Listener
     const nativeHandler = (e: KeyboardEvent) => {
         if (settings.inputSource === 'keyboard') {
             handleGlobalKeyDown(e);
@@ -234,58 +299,233 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', nativeHandler);
   }, [handleGlobalKeyDown, settings.inputSource]);
 
-  // Gamepad Polling Logic - Fixed to dispatch events for SettingsPanel binding
-  const prevButtonsRef = useRef<boolean[]>([]);
-  useEffect(() => {
-      let reqId: number;
-      const pollGamepads = () => {
-          if (settings.inputSource !== 'gamepad') return;
-          
-          const gamepads = navigator.getGamepads();
-          if (gamepads[0]) {
-              const gp = gamepads[0];
-              const buttons = gp.buttons;
-              
-              buttons.forEach((btn, idx) => {
-                  if (btn.pressed && !prevButtonsRef.current[idx]) {
-                      const virtualCode = `Gamepad_${idx}`;
-                      
-                      // CRITICAL FIX: Dispatch a real DOM event so SettingsPanel can catch it for binding
-                      const event = new KeyboardEvent('keydown', {
-                          code: virtualCode,
-                          bubbles: true,
-                          cancelable: true,
-                          view: window
-                      });
-                      window.dispatchEvent(event);
+  // Yomitan Instant Lookup Logic (Triggered on Hover)
+  const handleYomitanHover = useCallback(async (event: React.MouseEvent, char: string, line: SubtitleLine, index: number) => {
+      // Use Ref to check pinned state to avoid dependency on yomitanPopup object
+      if (yomitanPinnedRef.current) return;
 
-                      // Also call global handler for app logic
-                      handleGlobalKeyDown({ code: virtualCode, preventDefault: () => {} });
-                  }
-              });
-
-              // D-Pad handling
-              if (buttons[14]?.pressed && !prevButtonsRef.current[14]) {
-                  const code = 'Gamepad_14';
-                  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
-                  handleGlobalKeyDown({ code, preventDefault: () => {} });
-              }
-              if (buttons[15]?.pressed && !prevButtonsRef.current[15]) {
-                  const code = 'Gamepad_15';
-                  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
-                  handleGlobalKeyDown({ code, preventDefault: () => {} });
-              }
-
-              prevButtonsRef.current = buttons.map(b => b.pressed);
-          }
-          reqId = requestAnimationFrame(pollGamepads);
-      };
+      const chars = Array.from(line.text);
+      const suffix = chars.slice(index).join('');
       
-      if (settings.inputSource === 'gamepad') {
-          reqId = requestAnimationFrame(pollGamepads);
+      const maxScanLength = 15;
+      const candidatesSet = new Set<string>();
+      const lenToCands = new Map<number, { exact: string, deinflected: DeinflectionResult[] }>();
+      
+      let scope = currentTrack?.language || settings.learningLanguage;
+      if (isJapanese(suffix.substring(0, 1))) {
+          scope = 'ja';
       }
-      return () => cancelAnimationFrame(reqId);
-  }, [settings.inputSource, handleGlobalKeyDown]);
+
+      // 1. Generate Candidates (1 to Max)
+      for (let len = 1; len <= Math.min(suffix.length, maxScanLength); len++) {
+          const sub = suffix.substring(0, len);
+          let deinflectedResults: DeinflectionResult[] = [];
+          if (scope === 'ja') {
+              deinflectedResults = deinflect(sub);
+          }
+          
+          candidatesSet.add(sub);
+          deinflectedResults.forEach(d => candidatesSet.add(d.term));
+          
+          lenToCands.set(len, { exact: sub, deinflected: deinflectedResults });
+      }
+
+      // 2. Batch Search
+      const searchResults = await batchSearchTerms(Array.from(candidatesSet), scope);
+      const resultMap = new Map(searchResults.map(r => [r.word, r]));
+
+      // 3. Selection Strategy: 2+ chars > Exact > Deinflected > 1 char
+      let primaryResult: DictionaryResult | null = null;
+      let highlightLength = 0;
+      let currentReason: string | undefined = undefined;
+      let originalTextMatch = "";
+
+      // Check lengths from Max down to 2
+      for (let len = Math.min(suffix.length, maxScanLength); len >= 2; len--) {
+          const data = lenToCands.get(len);
+          if (!data) continue;
+
+          if (resultMap.has(data.exact)) {
+              primaryResult = resultMap.get(data.exact)!;
+              highlightLength = len;
+              currentReason = undefined;
+              originalTextMatch = data.exact;
+              break; 
+          }
+
+          for (const dRes of data.deinflected) {
+              if (resultMap.has(dRes.term)) {
+                  primaryResult = resultMap.get(dRes.term)!;
+                  highlightLength = len;
+                  currentReason = dRes.reasons.length > 0 ? dRes.reasons.join(' ← ') : undefined;
+                  originalTextMatch = data.exact;
+                  break;
+              }
+          }
+          if (primaryResult) break;
+      }
+
+      if (!primaryResult) {
+          const data = lenToCands.get(1);
+          if (data) {
+              if (resultMap.has(data.exact)) {
+                  primaryResult = resultMap.get(data.exact)!;
+                  highlightLength = 1;
+                  originalTextMatch = data.exact;
+              } else {
+                  for (const dRes of data.deinflected) {
+                      if (resultMap.has(dRes.term)) {
+                          primaryResult = resultMap.get(dRes.term)!;
+                          highlightLength = 1;
+                          currentReason = dRes.reasons.length > 0 ? dRes.reasons.join(' ← ') : undefined;
+                          originalTextMatch = data.exact;
+                          break;
+                      }
+                  }
+              }
+          }
+      }
+
+      if (primaryResult) {
+          setDictionaryContext(line);
+          setYomitanPopup({
+              visible: true,
+              x: event.clientX,
+              y: event.clientY,
+              result: primaryResult,
+              allResults: searchResults, // Pass all results to popup for switching
+              originalStartIndex: index,
+              highlight: {
+                  lineId: line.id,
+                  start: index,
+                  length: highlightLength
+              },
+              pinned: false,
+              originalText: originalTextMatch,
+              deinflectionReason: currentReason
+          });
+      }
+  }, [currentTrack?.language, settings.learningLanguage]);
+
+  const handleYomitanClick = (event: React.MouseEvent, char: string, line: SubtitleLine, index: number) => {
+      if (yomitanPopup && yomitanPopup.visible) {
+          setYomitanPopup(prev => prev ? { ...prev, pinned: !prev.pinned } : null);
+      } else {
+          handleYomitanHover(event, char, line, index).then(() => {
+              setYomitanPopup(prev => prev ? { ...prev, pinned: true } : null);
+          });
+      }
+  };
+
+  const handleYomitanResultSwitch = (newResult: DictionaryResult) => {
+      if (!yomitanPopup) return;
+      
+      let highlightLength = Array.from(newResult.word).length; 
+      let foundReason: string | undefined = undefined;
+      let foundOriginal = newResult.word;
+
+      const fullText = dictionaryContext.text || "";
+      if (fullText && yomitanPopup.originalStartIndex !== undefined) {
+          const chars = Array.from(fullText);
+          const suffix = chars.slice(yomitanPopup.originalStartIndex).join('');
+          const maxScanLength = 15;
+          let scope = currentTrack?.language || settings.learningLanguage;
+          if (isJapanese(suffix.substring(0, 1))) scope = 'ja';
+
+          for (let len = Math.min(suffix.length, maxScanLength); len >= 1; len--) {
+              const sub = suffix.substring(0, len);
+              if (sub === newResult.word) {
+                  highlightLength = len;
+                  foundOriginal = sub;
+                  foundReason = undefined;
+                  break;
+              }
+              if (scope === 'ja') {
+                  const deinflected = deinflect(sub);
+                  const match = deinflected.find(d => d.term === newResult.word);
+                  if (match) {
+                      highlightLength = len;
+                      foundOriginal = sub;
+                      foundReason = match.reasons.join(' ← ');
+                      break;
+                  }
+              }
+          }
+      }
+
+      setYomitanPopup({
+          ...yomitanPopup,
+          result: newResult,
+          highlight: {
+              lineId: yomitanPopup.highlight!.lineId,
+              start: yomitanPopup.originalStartIndex!,
+              length: highlightLength
+          },
+          originalText: foundOriginal,
+          deinflectionReason: foundReason
+      });
+  };
+
+  const handleYomitanAddCard = async (result: DictionaryResult) => {
+      const definition = formatDefinitionForExport(result);
+      const word = result.word;
+      
+      const allTags = new Set<string>();
+      result.entries.forEach(e => e.tags?.forEach(t => allTags.add(t)));
+      const examVocabContent = Array.from(allTags).join(' ');
+
+      const sentence = dictionaryContext.text;
+      const sent = settings.ankiBoldWord 
+        ? sentence.replace(word, `<b>${word}</b>`)
+        : sentence;
+
+      if (settings.dictExportMode === 'table') {
+          const tableKey = 'lf_vocab_table';
+          const raw = localStorage.getItem(tableKey);
+          const table = raw ? JSON.parse(raw) : [];
+          table.push({
+              id: crypto.randomUUID(),
+              word,
+              definition,
+              sentence: sent,
+              translation: '',
+              tags: examVocabContent,
+              sourceTitle: currentTrack?.title || 'Unknown',
+              timeRange: `${formatTime(dictionaryContext.start)} - ${formatTime(dictionaryContext.end)}`,
+              addedAt: Date.now()
+          });
+          localStorage.setItem(tableKey, JSON.stringify(table));
+          showToast("Added to Table");
+      } else {
+          try {
+              let audioBase64 = undefined;
+              if (ankiSettings.fieldMap.audio && currentTrack?.file) {
+                  // Audio extraction logic simplified here
+              }
+              
+              const isSentenceMode = settings.dictMode === 'sentence';
+              let effectiveFieldMap = ankiSettings.fieldMap;
+              if (isSentenceMode && ankiSettings.sentenceFieldMap && Object.keys(ankiSettings.sentenceFieldMap).length > 0) {
+                  effectiveFieldMap = { ...ankiSettings.fieldMap, ...ankiSettings.sentenceFieldMap };
+              }
+
+              const tempSettings: AnkiSettings = { ...ankiSettings, fieldMap: effectiveFieldMap as any };
+              
+              await AnkiService.addNote(tempSettings, {
+                  word,
+                  definition,
+                  sentence: sent,
+                  translation: '',
+                  examVocab: examVocabContent
+              });
+              showToast(t.ankiSuccess);
+          } catch (e) {
+              console.error(e);
+              alert(t.ankiError);
+          }
+      }
+      setYomitanPopup(null); 
+  };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => {
     const file = e.target.files?.[0];
@@ -334,49 +574,22 @@ const App: React.FC = () => {
     if (!audioRef.current) return;
     const curr = audioRef.current.currentTime;
     setCurrentTime(curr);
-    
-    // AB Loop Logic
-    if (loopA !== null && loopB !== null) {
-      if (curr >= loopB) {
-        audioRef.current.currentTime = loopA;
-        return;
-      }
-    }
-
-    // Sentence Repeat Logic
-    if (isSentenceRepeat && activeSubtitleIndex !== -1) {
-        const currentLine = currentDisplaySubtitles[activeSubtitleIndex];
-        if (curr >= currentLine.end) {
-            audioRef.current.currentTime = currentLine.start;
-            return;
-        }
-    }
-
+    if (loopA !== null && loopB !== null && curr >= loopB) audioRef.current.currentTime = loopA;
+    if (isSentenceRepeat && activeSubtitleIndex !== -1 && curr >= currentDisplaySubtitles[activeSubtitleIndex].end) audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex].start;
     const newIdx = findSubtitleIndex(currentDisplaySubtitles, curr);
     if (newIdx !== -1 && newIdx !== activeSubtitleIndex) setActiveSubtitleIndex(newIdx);
   };
 
-  // AB Loop Toggles
   const toggleABLoop = () => {
       const curr = audioRef.current?.currentTime || 0;
-      if (loopA === null) {
-          setLoopA(curr);
-      } else if (loopB === null) {
-          if (curr > loopA) setLoopB(curr);
-          else { setLoopA(null); setLoopB(null); } // Reset if B < A
-      } else {
-          setLoopA(null);
-          setLoopB(null);
-      }
+      if (loopA === null) setLoopA(curr);
+      else if (loopB === null) curr > loopA ? setLoopB(curr) : (setLoopA(null), setLoopB(null));
+      else { setLoopA(null); setLoopB(null); }
   };
 
   const toggleSentenceRepeat = () => {
       setIsSentenceRepeat(prev => {
-          // If enabling, ensure we are in a subtitle range
-          if (!prev && activeSubtitleIndex !== -1) {
-              const line = currentDisplaySubtitles[activeSubtitleIndex];
-              if (audioRef.current) audioRef.current.currentTime = line.start;
-          }
+          if (!prev && activeSubtitleIndex !== -1 && audioRef.current) audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex].start;
           return !prev;
       });
   };
@@ -384,14 +597,9 @@ const App: React.FC = () => {
   const handleSaveBookmark = (bm: Bookmark) => {
       if (currentTrackId) {
           const updatedBookmarks = [...(currentTrack?.bookmarks || [])];
-          // Check if edit or new
           const existingIdx = updatedBookmarks.findIndex(b => b.id === bm.id);
-          if (existingIdx !== -1) {
-              updatedBookmarks[existingIdx] = bm;
-          } else {
-              updatedBookmarks.push({...bm, id: crypto.randomUUID()});
-          }
-          
+          if (existingIdx !== -1) updatedBookmarks[existingIdx] = bm;
+          else updatedBookmarks.push({...bm, id: crypto.randomUUID()});
           setAudioTracks(prev => prev.map(t => t.id === currentTrackId ? {...t, bookmarks: updatedBookmarks} : t));
           updateTrackMetadataInDB(currentTrackId, { bookmarks: updatedBookmarks });
       }
@@ -407,7 +615,6 @@ const App: React.FC = () => {
   };
 
   return (
-    // Fixed layout for iOS/Mobile: 100dvh prevents address bar issues, fixed position fixes scrolling/height collapse
     <div className="fixed inset-0 h-[100dvh] w-full bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans select-none overflow-hidden transition-colors duration-300 flex flex-col">
       <audio ref={audioRef} src={audioSrc || undefined} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(e) => {
         setDuration(e.currentTarget.duration);
@@ -429,6 +636,11 @@ const App: React.FC = () => {
          <div className="flex items-center gap-1 md:gap-2">
             {view === 'player' && (
                 <>
+                   {settings.dictExportMode === 'table' && (
+                       <button onClick={() => setShowVocabTable(true)} className="p-2 text-emerald-500 dark:text-emerald-400 hover:text-emerald-600 transition-colors" title="Vocabulary List">
+                          <i className="fa-solid fa-table"></i>
+                       </button>
+                   )}
                   <button onClick={() => setShowOffsetControl(prev => !prev)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors" title={t.adjustTiming}>
                      <i className="fa-solid fa-clock-rotate-left"></i>
                   </button>
@@ -450,9 +662,8 @@ const App: React.FC = () => {
           <div className="absolute top-16 left-0 right-0 z-40 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md p-2 flex justify-center border-b border-indigo-500/20">
               <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{t.adjustTiming}</span>
-                  <button onClick={() => { /* implementation needed in renderer, simplified here */ }} className="px-2 py-0.5 bg-gray-200 dark:bg-slate-700 rounded text-xs">-0.5s</button>
+                  <button onClick={() => { }} className="px-2 py-0.5 bg-gray-200 dark:bg-slate-700 rounded text-xs">-0.5s</button>
                   <button onClick={() => { }} className="px-2 py-0.5 bg-gray-200 dark:bg-slate-700 rounded text-xs">+0.5s</button>
-                  {/* Real implementation needs passing state down to renderer or lifting offset state up */}
               </div>
           </div>
       )}
@@ -483,32 +694,29 @@ const App: React.FC = () => {
                 onWordClick={(word, line, index) => { 
                     setWasPlayingBeforeModal(isPlaying); 
                     safePause(); 
-                    
-                    // Decide what to put in search box based on Mode
                     if (settings.dictMode === 'sentence') {
-                        setDictionaryTargetWord(line.text); // Fill full sentence
+                        setDictionaryTargetWord(line.text); 
                     } else {
-                        setDictionaryTargetWord(word); // Fill specific word
+                        setDictionaryTargetWord(word); 
                     }
-                    
                     setDictionaryTargetIndex(index); 
                     setDictionaryContext(line); 
                     setShowDictionaryModal(true); 
-                    
-                    // Copy depending on mode
-                    if(settings.copyToClipboard) {
-                        navigator.clipboard.writeText(settings.dictMode === 'sentence' ? line.text : word);
-                    }
+                    if(settings.copyToClipboard) navigator.clipboard.writeText(settings.dictMode === 'sentence' ? line.text : word);
                 }} 
+                onTextHover={handleYomitanHover}
+                onTextClick={handleYomitanClick}
                 segmentationMode={effectiveSegmentationMode} 
                 onAutoSegment={()=>{}} 
                 isScanning={false} 
                 onShiftTimeline={()=>{}} 
                 subtitleMode={settings.subtitleMode}
-                showSubtitles={showSubtitles} 
+                showSubtitles={showSubtitles}
+                yomitanMode={settings.yomitanMode} 
+                yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined}
               />
               
-              {/* Full List Overlay controlled by App state now */}
+              {/* Full List Overlay */}
               {showFullSubList && (
                 <div className="absolute inset-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl flex flex-col animate-fade-in transition-colors">
                   <div className="p-4 border-b border-gray-200 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-slate-900 shrink-0">
@@ -529,6 +737,21 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 </div>
+              )}
+
+              {/* Yomitan Popup */}
+              {yomitanPopup && yomitanPopup.visible && yomitanPopup.result && (
+                  <YomitanPopup 
+                      position={{ x: yomitanPopup.x, y: yomitanPopup.y }}
+                      result={yomitanPopup.result}
+                      allResults={yomitanPopup.allResults}
+                      onSelectResult={handleYomitanResultSwitch}
+                      onClose={() => setYomitanPopup(null)}
+                      onAddCard={handleYomitanAddCard}
+                      originalText={yomitanPopup.originalText}
+                      deinflectionReason={yomitanPopup.deinflectionReason}
+                      isLoading={false}
+                  />
               )}
 
               <PlayerControls 
@@ -573,6 +796,7 @@ const App: React.FC = () => {
         setSettings={setSettings}
         hasDictionaries={hasDictionaries}
         onAnkiSuccess={() => showToast(t.ankiSuccess)}
+        onTableSuccess={() => showToast("已添加到生词表 (Added to Table)")}
       />
       
       <SidePanel 
@@ -582,7 +806,7 @@ const App: React.FC = () => {
         bookmarks={currentTrack?.bookmarks || []} 
         onSeek={t => { if(audioRef.current) audioRef.current.currentTime=t; }} 
         onDeleteBookmark={deleteBookmark} 
-        onEditBookmark={(bm) => { /* Reuse bookmark modal for edit logic if needed */ setShowBookmarkModal(true); /* Logic to pass bm data needed */ }}
+        onEditBookmark={(bm) => { setShowBookmarkModal(true); }}
         language={settings.language}
         currentTrack={currentTrack}
       />
@@ -594,6 +818,13 @@ const App: React.FC = () => {
         currentTrackTitle={currentTrack?.title || "Unknown Track"}
         onSave={handleSaveBookmark}
         language={settings.language}
+      />
+      
+      <VocabListModal 
+         isOpen={showVocabTable}
+         onClose={() => setShowVocabTable(false)}
+         language={settings.language}
+         onUpdate={() => {}}
       />
 
       {isOpeningTrack && <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl"><div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>}

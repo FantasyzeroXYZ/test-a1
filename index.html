@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="supported-color-schemes" content="light dark">
     <title>LinguaFlow Player</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -16,14 +17,21 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-      html, body {
+      html {
         height: 100%;
         width: 100%;
+        overflow: hidden;
+      }
+      body {
         margin: 0;
         padding: 0;
-        overflow: hidden;
-        /* Ensure background color matches app to prevent white/dark flashes */
-        background-color: #f9fafb; 
+        /* Via Browser Fix: Use min-height 100dvh and flex column */
+        min-height: 100dvh;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden; 
+        background-color: #f9fafb; /* Explicit background */
         -webkit-user-select: none;
         user-select: none;
         overscroll-behavior: none;
@@ -34,13 +42,14 @@
       
       /* Via Browser & Mobile Viewport Fixes */
       #root {
-        position: relative; /* Changed from default or fixed to relative to ensure layout flow */
+        position: relative; 
+        z-index: 10; /* Ensure it sits above browser UI glitches */
+        flex: 1; /* Take up remaining space */
+        display: flex;
+        flex-direction: column;
         width: 100%;
-        height: 100%; /* Fallback */
-        height: 100dvh; /* Dynamic viewport height */
-        min-height: 100dvh; /* Ensure minimum height */
-        z-index: 1; /* Force layer */
-        max-height: none !important; /* Prevent browser override */
+        background-color: inherit; /* Match body */
+        max-height: none !important;
         overflow: hidden;
       }
 
@@ -62,9 +71,7 @@
         transform: scale(1.05);
         text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
       }
-      /* Dictionary Panel Styles needed for specific ID behavior or transitions */
       #dictionary-panel {
-        /* Ensure it sits above everything */
         max-height: 85vh;
       }
       @keyframes bounce-in {

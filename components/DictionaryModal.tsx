@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, memo, useMemo, useCallback } from 'react';
-import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, SegmentationMode, WebSearchEngine, AnkiSettings, AudioTrack, ReaderSettings } from '../types';
+import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, SegmentationMode, WebSearchEngine, AnkiSettings, AudioTrack, ReaderSettings, TableEntry } from '../types';
 import { getTranslation } from '../utils/i18n';
 import { segmentText, isWord, isNonSpacedLang } from '../utils/textUtils';
 import { lookupWord } from '../services/dictionaryService';
 import { addNote } from '../services/ankiService';
 import { extractAudioClip } from '../utils/audioUtils';
 import { searchLocalDictionary, getLocalTagsForTerm } from '../utils/storage';
-import { downloadFile } from '../utils/parsers';
+import { formatTime } from '../utils/parsers';
 
 interface Props {
   isOpen: boolean;
@@ -27,6 +27,7 @@ interface Props {
   setSettings: (s: ReaderSettings) => void;
   hasDictionaries: boolean; 
   onAnkiSuccess?: () => void;
+  onTableSuccess?: () => void;
 }
 
 type WebSearchCategory = 'search' | 'translate' | 'encyclopedia';
@@ -40,6 +41,7 @@ interface StructuredNode {
   type?: string; 
 }
 
+// Render component for Dictionary View (visual only)
 const StructuredContent: React.FC<{ content: any }> = ({ content }) => {
   if (content === null || content === undefined) return null;
 
@@ -83,12 +85,12 @@ const StructuredContent: React.FC<{ content: any }> = ({ content }) => {
   return null;
 };
 
-// Helper to convert structured content object to HTML string for Anki
-const structuredContentToHtml = (content: any): string => {
+// --- Plain Text Formatter for Export (Anki/Table) ---
+const formatContentPlain = (content: any, depth: number = 0): string => {
     if (content === null || content === undefined) return '';
 
     if (Array.isArray(content)) {
-        return content.map(child => structuredContentToHtml(child)).join('');
+        return content.map(child => formatContentPlain(child, depth)).join('');
     }
 
     if (typeof content === 'string') {
@@ -97,31 +99,26 @@ const structuredContentToHtml = (content: any): string => {
 
     if (typeof content === 'object') {
         if (content.type === 'structured-content' && content.content) {
-            return structuredContentToHtml(content.content);
+            return formatContentPlain(content.content, depth);
         }
 
-        const TagName = (content.tag as string) || 'span';
+        // Add line breaks for list items or divs to simulate structure
+        const tag = content.tag;
+        const inner = formatContentPlain(content.content, depth + 1);
         
-        let attrs = '';
-        if (content.href) {
-            attrs += ` href="${content.href}"`;
-        }
-        if (content.style) {
-            const styleStr = Object.entries(content.style).map(([k, v]) => `${k}:${v}`).join(';');
-            attrs += ` style="${styleStr}"`;
-        }
-
-        const innerHtml = structuredContentToHtml(content.content);
-        return `<${TagName}${attrs}>${innerHtml}</${TagName}>`;
+        if (tag === 'li') return `\n${'  '.repeat(depth)}- ${inner}`;
+        if (tag === 'div' || tag === 'p') return `\n${inner}`;
+        if (tag === 'br') return '\n';
+        
+        return inner;
     }
-
     return '';
 };
 
 const DictionaryModal: React.FC<Props> = ({ 
   isOpen, onClose, initialWord, initialSegmentIndex, sentence, contextLine, 
   language, learningLanguage, ankiSettings, segmentationMode, webSearchEngine: defaultWebEngine, currentTrack, audioRef, ttsSettings,
-  settings, setSettings, hasDictionaries, onAnkiSuccess
+  settings, setSettings, hasDictionaries, onAnkiSuccess, onTableSuccess
 }) => {
   const t = getTranslation(language);
   const effectiveLearningLang = currentTrack?.language || learningLanguage;
@@ -147,7 +144,6 @@ const DictionaryModal: React.FC<Props> = ({
   const [customDef, setCustomDef] = useState('');
   const [isPinned, setIsPinned] = useState(false);
   const [isAddingToAnki, setIsAddingToAnki] = useState(false);
-  const [showWebCustomDef, setShowWebCustomDef] = useState(false);
   const [highlightRange, setHighlightRange] = useState<{start: number, end: number}>({start: initialSegmentIndex, end: initialSegmentIndex});
   const [webCategory, setWebCategory] = useState<WebSearchCategory>('translate');
   const [currentWebEngine, setCurrentWebEngine] = useState<WebSearchEngine>(defaultWebEngine);
@@ -377,73 +373,50 @@ const DictionaryModal: React.FC<Props> = ({
     return Array.from(set);
   }, [currentData]);
 
-  // Construct structured HTML for Anki based on current data
-  const formatAnkiDefinition = (dictData: DictionaryResponse): string => {
+  // Format definition for Anki/Table: Plain Text, Structured
+  const formatDefinitionForExport = (dictData: DictionaryResponse): string => {
       if (!dictData.entries || dictData.entries.length === 0) return dictData.word;
       
-      return dictData.entries.map(entry => {
-          const sensesHtml = entry.senses.map(s => {
+      let text = "";
+      
+      dictData.entries.forEach((entry, idx) => {
+          if (idx > 0) text += "\n\n";
+          text += `[${entry.partOfSpeech}]\n`;
+          
+          entry.senses.forEach((s, sIdx) => {
               let defContent = s.definition;
               // Check if definition is a JSON string of structured content
               try {
                   if (typeof defContent === 'string' && defContent.trim().startsWith('{') && defContent.includes('"type":"structured-content"')) {
                       const parsed = JSON.parse(defContent);
-                      defContent = structuredContentToHtml(parsed);
+                      // Convert structured content object to plain text
+                      defContent = formatContentPlain(parsed);
                   }
               } catch (e) {
-                  // Fallback to original string if parse fails
+                  // Fallback
               }
-              
-              return `<li>${defContent}</li>`;
-          }).join('');
-          
-          return `<div class="entry">
-              <div class="pos-header"><b>[${entry.partOfSpeech}]</b></div>
-              <ul>${sensesHtml}</ul>
-          </div>`;
-      }).join('<hr/>');
+              text += `${sIdx + 1}. ${defContent}\n`;
+          });
+      });
+      
+      return text.trim();
   };
 
   // --- Table Mode Logic ---
 
-  const saveToTable = (entry: any) => {
+  const saveToTable = (entry: Omit<TableEntry, 'id'>) => {
     const tableKey = 'lf_vocab_table';
     const raw = localStorage.getItem(tableKey);
-    const table = raw ? JSON.parse(raw) : [];
-    table.push(entry);
+    const table: TableEntry[] = raw ? JSON.parse(raw) : [];
+    
+    // Add new entry with ID
+    table.push({
+        ...entry,
+        id: crypto.randomUUID()
+    });
+    
     localStorage.setItem(tableKey, JSON.stringify(table));
-    alert(language === 'zh' ? "已添加到生词表" : "Added to Vocabulary List");
-  };
-
-  const exportTable = () => {
-     const tableKey = 'lf_vocab_table';
-     const raw = localStorage.getItem(tableKey);
-     const table = raw ? JSON.parse(raw) : [];
-     
-     if (table.length === 0) {
-         alert(language === 'zh' ? "生词表为空" : "List is empty");
-         return;
-     }
-
-     // Convert to CSV
-     // Fields: Word, Definition, Sentence, Translation, Tags, Date
-     const header = ["Word", "Definition", "Sentence", "Translation", "Tags", "Date"];
-     const csvRows = [header.join(',')];
-     
-     table.forEach((row: any) => {
-         const cols = [
-             `"${(row.word || '').replace(/"/g, '""')}"`,
-             `"${(row.definition || '').replace(/"/g, '""')}"`,
-             `"${(row.sentence || '').replace(/"/g, '""')}"`,
-             `"${(row.translation || '').replace(/"/g, '""')}"`,
-             `"${(row.tags || '').replace(/"/g, '""')}"`,
-             `"${new Date(row.date).toLocaleDateString()}"`
-         ];
-         csvRows.push(cols.join(','));
-     });
-     
-     const csvContent = csvRows.join('\n');
-     downloadFile(csvContent, `vocab_list_${new Date().toISOString().slice(0,10)}.csv`, 'text/csv');
+    if (onTableSuccess) onTableSuccess();
   };
 
   // --- Main Add Action ---
@@ -462,31 +435,36 @@ const DictionaryModal: React.FC<Props> = ({
         try {
             if (definition.trim().startsWith('{') && definition.includes('"type":"structured-content"')) {
                 const parsed = JSON.parse(definition);
-                definition = structuredContentToHtml(parsed);
+                definition = formatContentPlain(parsed);
             }
         } catch(e) {}
     } else if (activeTab === 'dict' && currentData) {
-        // Use formatter
-        definition = formatAnkiDefinition(currentData);
+        // Use plain text formatter
+        definition = formatDefinitionForExport(currentData);
     } else if (!customDef && activeTab === 'dict') {
-        // Fallback if no definition found
         definition = searchTerm;
     }
 
     // Common Data
     const examVocabContent = allHeaderTags.length > 0 ? allHeaderTags.join(' ') : '';
     const word = searchTerm;
-    const sent = sentence.replace(searchTerm, `<b>${searchTerm}</b>`);
+    
+    // Apply Bold Setting
+    const sent = settings.ankiBoldWord 
+        ? sentence.replace(searchTerm, `<b>${searchTerm}</b>`)
+        : sentence;
 
     if (settings.dictExportMode === 'table') {
         // Table Mode
         saveToTable({
             word,
             definition,
-            sentence: sentence,
-            translation: '', // User usually needs to input this manually or extract from dict if possible, simplified here
+            sentence: sent,
+            translation: '', 
             tags: examVocabContent,
-            date: Date.now()
+            sourceTitle: currentTrack?.title || 'Unknown Source',
+            timeRange: `${formatTime(contextLine.start)} - ${formatTime(contextLine.end)}`,
+            addedAt: Date.now()
         });
         return;
     }
@@ -566,7 +544,6 @@ const DictionaryModal: React.FC<Props> = ({
       const newMode = settings.dictMode === 'word' ? 'sentence' : 'word';
       setSettings({...settings, dictMode: newMode});
       
-      // Auto-populate logic based on new mode
       if (newMode === 'sentence') {
           setSearchTerm(sentence);
           setHighlightRange({start: 0, end: segments.length - 1});
@@ -600,6 +577,7 @@ const DictionaryModal: React.FC<Props> = ({
       }
   };
 
+  // Helper function to render definition content for Display (with structured content support)
   const renderDefinitionContent = (definition: string) => {
       try {
           if (definition.trim().startsWith('{"type":"structured-content"')) {
@@ -608,6 +586,7 @@ const DictionaryModal: React.FC<Props> = ({
           }
       } catch (e) { }
       
+      // Basic formatting for non-structured content
       if (/[①-⑳㋐-㋾▲△ᐅ〔]/.test(definition)) {
           const parts = definition.split(/(?=[①-⑳㋐-㋾▲△ᐅ〔])/);
           return (
@@ -622,22 +601,11 @@ const DictionaryModal: React.FC<Props> = ({
                     if (part.match(/^[㋐-㋾]/)) {
                          return <div key={i} className="ml-4 mt-0.5"><span className="font-bold text-slate-600 dark:text-slate-400 mr-1">{part.charAt(0)}</span>{part.substring(1)}</div>;
                     }
-                    if (part.match(/^[▲△]/)) {
-                         return <div key={i} className="ml-8 mt-0.5 text-xs text-slate-500 dark:text-slate-400 font-mono flex items-start"><span className="mr-1 opacity-70">▲</span><span>{part.substring(1)}</span></div>;
-                    }
-                    if (part.match(/^[ᐅ]/)) {
-                         return <div key={i} className="ml-2 mt-0.5 text-xs text-slate-500 font-bold">ᐅ {part.substring(1)}</div>;
-                    }
-                    if (part.match(/^[〔]/)) {
-                         return <div key={i} className="mt-1 text-xs text-slate-400 block">{part}</div>;
-                    }
-                    
                     return <div key={i} className="mb-0.5">{part}</div>;
                 })}
             </div>
           );
       }
-      
       return definition;
   };
 
@@ -675,11 +643,6 @@ const DictionaryModal: React.FC<Props> = ({
             </div>
             
             <div className="flex items-center gap-2">
-              {settings.dictExportMode === 'table' && (
-                  <button onClick={exportTable} className="p-2 text-emerald-500 hover:text-emerald-600 dark:text-emerald-400 dark:hover:text-emerald-300" title="Export Table">
-                      <i className="fa-solid fa-file-csv"></i>
-                  </button>
-              )}
               <button onClick={() => setIsPinned(!isPinned)} className={`p-2 rounded-full ${isPinned ? 'text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-400/10' : 'text-slate-400 hover:text-slate-600 dark:hover:text-white'}`}><i className="fa-solid fa-thumbtack"></i></button>
               <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"><i className="fa-solid fa-xmark"></i></button>
             </div>
@@ -694,6 +657,7 @@ const DictionaryModal: React.FC<Props> = ({
               <button onClick={handleAppendSegment} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white" title={t.appendSegment}><i className="fa-solid fa-plus"></i></button>
               <button onClick={handleCopyFullSentence} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white" title="全句查询"><i className="fa-solid fa-quote-right"></i></button>
               <button onClick={() => handleSearch()} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white"><i className="fa-solid fa-magnifying-glass"></i></button>
+              {/* Unified Save Button */}
               <button 
                   onClick={() => handleAddToAnkiOrTable()} 
                   disabled={isAddingToAnki} 
@@ -721,7 +685,7 @@ const DictionaryModal: React.FC<Props> = ({
           <button onClick={handleReplaySentence} className="p-2 text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 shrink-0" title={t.replaySentence}><i className="fa-solid fa-rotate-right"></i></button>
         </div>
 
-        {/* Persistent Word Bar - Now visible on all tabs */}
+        {/* Persistent Word Bar */}
         <div className="p-2 border-b border-gray-200 dark:border-slate-700 flex flex-col bg-gray-50 dark:bg-slate-800/30 transition-colors shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 flex-wrap">
@@ -758,7 +722,6 @@ const DictionaryModal: React.FC<Props> = ({
 
         <div className="flex-1 overflow-hidden relative bg-white dark:bg-slate-900 transition-colors">
           <div className={`h-full flex flex-col ${activeTab === 'dict' ? 'block' : 'hidden'}`}>
-              {/* Added select-text to allow copying */}
               <div className="flex-1 overflow-y-auto p-4 yomitan-content select-text cursor-text">
                   <style>{`
                     .yomitan-content p { margin: 0 0 2px 0; }
@@ -816,7 +779,9 @@ const DictionaryModal: React.FC<Props> = ({
           </div>
 
           <div className={`h-full flex flex-col ${activeTab === 'web' ? 'block' : 'hidden'}`}>
+             {/* Web Options Row */}
               <div className="p-2 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/30 transition-colors flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  {/* ... (Existing Web buttons) ... */}
                   <div className="flex gap-0.5 shrink-0">
                       <button onClick={handleWebBack} disabled={webHistoryIndex <= 0} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webBack}><i className="fa-solid fa-arrow-left text-[10px]"></i></button>
                       <button onClick={handleWebForward} disabled={webHistoryIndex >= webHistory.length - 1} className="w-7 h-7 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-slate-700 rounded text-slate-500 dark:text-slate-400 disabled:opacity-30" title={t.webForward}><i className="fa-solid fa-arrow-right text-[10px]"></i></button>
@@ -853,10 +818,17 @@ const DictionaryModal: React.FC<Props> = ({
                   <button onClick={toggleLinkMode} className={`ml-auto w-7 h-7 flex items-center justify-center rounded shrink-0 ${settings.webLinkMode === 'inline' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`} title={settings.webLinkMode === 'inline' ? "Inline" : "External"}>
                       <i className={`fa-solid ${settings.webLinkMode === 'inline' ? 'fa-up-right-from-square' : 'fa-arrow-up-right-from-square'} text-[10px]`}></i>
                   </button>
+                  
+                  {/* Web Custom Input Trigger Fixed */}
+                  <button onClick={() => {
+                        const newUrl = prompt(t.enterUrl, currentWebUrl);
+                        if (newUrl) navigateToUrl(newUrl);
+                  }} className="w-7 h-7 flex items-center justify-center rounded shrink-0 hover:bg-gray-200 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white" title="Enter Custom URL">
+                      <i className="fa-solid fa-keyboard text-[10px]"></i>
+                  </button>
               </div>
 
               <div className="flex-1 relative bg-gray-100 dark:bg-black">
-                   {/* Iframe or Placeholder */}
                    {settings.webLinkMode === 'inline' ? (
                        <iframe 
                            ref={iframeRef}
@@ -881,19 +853,22 @@ const DictionaryModal: React.FC<Props> = ({
                      <i className="fa-solid fa-lightbulb mr-2"></i>
                      {t.dictOverride}
                  </div>
+                 
+                 {/* Action Bar for Custom Tab */}
+                 <div className="flex gap-2 mb-2">
+                     <button onClick={toggleClipboard} className={`px-2 py-1 rounded text-[10px] font-bold border ${settings.copyToClipboard ? 'bg-indigo-100 text-indigo-600 border-indigo-300' : 'bg-white border-gray-300 text-slate-500'}`}>{t.clipboardMode}</button>
+                     <button onClick={() => setCustomDef('')} className="px-2 py-1 rounded text-[10px] font-bold border border-red-200 text-red-500 hover:bg-red-50">Clear</button>
+                 </div>
+
                  <textarea 
                     value={customDef}
                     onChange={(e) => setCustomDef(e.target.value)}
                     className="flex-1 w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-xl p-4 text-slate-800 dark:text-white focus:border-indigo-500 outline-none resize-none text-sm transition-colors"
                     placeholder={t.dictCustomPlaceholder}
                  />
-                 <button 
-                    onClick={() => handleAddToAnkiOrTable()}
-                    disabled={isAddingToAnki || !customDef.trim()}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50 active:scale-95"
-                 >
-                    {isAddingToAnki ? <i className="fa-solid fa-spinner animate-spin"></i> : t.saveToAnki}
-                 </button>
+                 
+                 {/* Removed bottom button, use the top header button instead */}
+                 <div className="text-center text-xs text-slate-400 italic pb-2">Use the save button in the header to add card.</div>
              </div>
           </div>
         </div>
