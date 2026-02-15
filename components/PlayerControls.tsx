@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { formatTime } from '../utils/parsers';
 import { Language } from '../types';
@@ -92,7 +91,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <button 
              onClick={onToggleSidePanel}
              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-indigo-500 transition-colors"
-             title="Toggle Sidebar"
+             title={t.toggleSidebar}
           >
              <i className="fa-solid fa-list-ul text-xs"></i>
           </button>
@@ -155,7 +154,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             <button 
               onClick={onToggleShowSubtitles} 
               className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all ${showSubtitles ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}
-              title="Toggle Subtitles"
+              title={t.toggleSubtitles}
             >
               {showSubtitles ? <i className="fa-solid fa-closed-captioning text-sm md:text-base"></i> : <i className="fa-regular fa-closed-captioning text-sm md:text-base"></i>}
             </button>

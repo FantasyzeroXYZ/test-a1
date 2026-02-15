@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Chapter, Bookmark, Language, AudioTrack } from '../types';
 import { getTranslation } from '../utils/i18n';

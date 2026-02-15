@@ -45,14 +45,14 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
     };
 
     const handleDelete = (id: string) => {
-        if (confirm("Delete this entry?")) {
+        if (confirm(t.deleteEntryConfirm)) {
             const newEntries = entries.filter(e => e.id !== id);
             saveEntries(newEntries);
         }
     };
 
     const handleClearAll = () => {
-        if (confirm("Are you sure you want to clear ALL vocabulary entries? This cannot be undone.")) {
+        if (confirm(t.clearAllVocabConfirm)) {
             saveEntries([]);
             setCurrentPage(1);
         }
@@ -60,7 +60,7 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
 
     const handleExportCSV = () => {
         if (entries.length === 0) {
-            alert("List is empty");
+            alert(t.listEmpty);
             return;
         }
 
@@ -119,15 +119,15 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                 {/* Header */}
                 <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center bg-gray-50 dark:bg-slate-800">
                     <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                        <i className="fa-solid fa-table text-emerald-500"></i> Vocabulary Table
-                        <span className="text-xs font-normal text-slate-500 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">{entries.length} items</span>
+                        <i className="fa-solid fa-table text-emerald-500"></i> {t.vocabTable}
+                        <span className="text-xs font-normal text-slate-500 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">{t.nItems.replace('{count}', String(entries.length))}</span>
                     </h2>
                     <div className="flex gap-2">
                         <button onClick={handleExportCSV} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                            <i className="fa-solid fa-file-csv"></i> Export CSV
+                            <i className="fa-solid fa-file-csv"></i> {t.exportCSV}
                         </button>
                         <button onClick={handleClearAll} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-xs font-bold rounded">
-                            Clear All
+                            {t.clearAll}
                         </button>
                         <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-full">
                             <i className="fa-solid fa-xmark text-lg"></i>
@@ -140,7 +140,7 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                     {entries.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-slate-400">
                             <i className="fa-solid fa-box-open text-4xl mb-4 opacity-30"></i>
-                            <p>No vocabulary entries yet.</p>
+                            <p>{t.noVocab}</p>
                         </div>
                     ) : (
                         paginatedEntries.map(entry => (
@@ -151,18 +151,18 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                                             value={editForm.word || ''} 
                                             onChange={e => setEditForm({...editForm, word: e.target.value})}
                                             className="w-full p-2 text-sm border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white font-bold"
-                                            placeholder="Word"
+                                            placeholder={t.placeholderWord}
                                         />
                                         <textarea 
                                             value={editForm.definition || ''} 
                                             onChange={e => setEditForm({...editForm, definition: e.target.value})}
                                             className="w-full p-2 text-sm border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                                             rows={3}
-                                            placeholder="Definition"
+                                            placeholder={t.placeholderDefinition}
                                         />
                                         <div className="flex justify-end gap-2">
-                                            <button onClick={cancelEdit} className="px-3 py-1 text-xs text-slate-500">Cancel</button>
-                                            <button onClick={saveEdit} className="px-3 py-1 bg-emerald-600 text-white text-xs rounded">Save</button>
+                                            <button onClick={cancelEdit} className="px-3 py-1 text-xs text-slate-500">{t.cancel}</button>
+                                            <button onClick={saveEdit} className="px-3 py-1 bg-emerald-600 text-white text-xs rounded">{t.save}</button>
                                         </div>
                                     </div>
                                 ) : (
@@ -201,9 +201,9 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                 {/* Pagination */}
                 {totalPages > 1 && (
                     <div className="p-3 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 flex justify-between items-center">
-                        <button onClick={prevPage} disabled={currentPage === 1} className="px-3 py-1 bg-gray-100 dark:bg-slate-700 rounded disabled:opacity-50 text-xs">Previous</button>
-                        <span className="text-xs text-slate-500">Page {currentPage} of {totalPages}</span>
-                        <button onClick={nextPage} disabled={currentPage === totalPages} className="px-3 py-1 bg-gray-100 dark:bg-slate-700 rounded disabled:opacity-50 text-xs">Next</button>
+                        <button onClick={prevPage} disabled={currentPage === 1} className="px-3 py-1 bg-gray-100 dark:bg-slate-700 rounded disabled:opacity-50 text-xs">{t.previous}</button>
+                        <span className="text-xs text-slate-500">{t.pageIndicator.replace('{current}', String(currentPage)).replace('{total}', String(totalPages))}</span>
+                        <button onClick={nextPage} disabled={currentPage === totalPages} className="px-3 py-1 bg-gray-100 dark:bg-slate-700 rounded disabled:opacity-50 text-xs">{t.next}</button>
                     </div>
                 )}
             </div>

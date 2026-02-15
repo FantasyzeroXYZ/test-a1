@@ -1,182 +1,141 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { DictionaryResult, DictionaryEntry } from '../types';
+
+export interface YomitanAnalysisResult {
+    segment: string;
+    length: number;
+    foundWords: {
+        result: DictionaryResult;
+        source: 'direct' | 'deinflected' | 'reading';
+        secondarySource?: 'reading';
+        reason?: string;
+    }[];
+}
 
 interface YomitanPopupProps {
   position: { x: number; y: number };
-  result: DictionaryResult;
-  allResults?: DictionaryResult[]; // Candidates list
-  onSelectResult?: (result: DictionaryResult) => void;
+  results: YomitanAnalysisResult[];
+  activeSegmentIndex: number;
+  onSelectSegment: (index: number) => void;
+  seenWords: Set<string>;
   onClose: () => void;
-  onAddCard: (entry: any) => void;
-  isLoading: boolean;
-  originalText?: string;
-  deinflectionReason?: string;
+  onAddCard: (result: DictionaryResult, entry?: DictionaryEntry) => void;
+  onAddAllCardsInTab: (results: DictionaryResult[]) => void;
+  t: { [key: string]: string };
 }
 
+const WordDefinition: React.FC<{ 
+    wordMatch: YomitanAnalysisResult['foundWords'][0], 
+    onAddCard: (result: DictionaryResult, entry: DictionaryEntry) => void,
+    isFirstDefinition: boolean 
+}> = ({ wordMatch, onAddCard, isFirstDefinition }) => {
+    return (
+        <div className="p-2 space-y-1">
+            {wordMatch.result.entries.map((entry, idx) => (
+                <details key={idx} open={isFirstDefinition && idx === 0} className="group text-left bg-white dark:bg-slate-800/50 rounded">
+                    <summary className="list-none cursor-pointer flex items-center justify-between gap-2 p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                        <div className="flex items-center gap-2">
+                            <span className="w-4 h-4 flex items-center justify-center text-slate-400 group-open:rotate-90 transition-transform"><i className="fa-solid fa-chevron-right text-[8px]"></i></span>
+                            <span className="text-[9px] font-black text-indigo-500 dark:text-indigo-400 uppercase tracking-widest">{entry.partOfSpeech || 'Dictionary'}</span>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); onAddCard(wordMatch.result, entry); }} className="px-1.5 py-0.5 text-[9px] text-slate-400 hover:text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                            <i className="fa-solid fa-plus"></i>
+                        </button>
+                    </summary>
+                    <div className="pl-7 pr-2 pt-1 pb-2">
+                        <div className="space-y-2 text-sm text-slate-700 dark:text-slate-300 border-l border-slate-200 dark:border-slate-700 pl-2">
+                            {entry.senses.map((sense, sIdx) => (
+                                <div key={sIdx} className="leading-snug">
+                                    <span className="text-slate-400 mr-1.5 font-mono text-xs">{sIdx + 1}.</span>
+                                    <span>{typeof sense.definition === 'string' ? sense.definition : 'Complex Content'}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </details>
+            ))}
+        </div>
+    );
+};
+
 export const YomitanPopup: React.FC<YomitanPopupProps> = ({ 
-    position, result, allResults, onSelectResult, onClose, onAddCard, isLoading, 
-    originalText, deinflectionReason 
+    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t
 }) => {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        onClose();
-      }
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  // Prevent off-screen rendering
   const style: React.CSSProperties = {
     position: 'fixed',
-    left: Math.min(window.innerWidth - 340, Math.max(10, position.x)), 
-    top: Math.min(window.innerHeight - 350, position.y + 20),
+    left: Math.min(window.innerWidth - 340, Math.max(10, position.x - 160)), 
+    top: Math.min(window.innerHeight - 450, position.y + 25), 
     maxHeight: '400px',
     zIndex: 1000, 
   };
-
-  if (isLoading) return null; 
-
-  // Show all unique results, sort by length descending
-  const sortedResults = useMemo(() => {
-      if (!allResults) return [result];
-      // Deduplicate by word
-      const seen = new Set<string>();
-      const unique = allResults.filter(r => {
-          if (seen.has(r.word)) return false;
-          seen.add(r.word);
-          return true;
-      });
-      return unique.sort((a, b) => b.word.length - a.word.length);
-  }, [allResults, result]);
-
-  // Group entries by Dictionary Source
-  const entriesByDict = useMemo(() => {
-      const groups: Record<string, DictionaryEntry[]> = {};
-      result.entries.forEach(entry => {
-          const dictName = entry.partOfSpeech || 'Dictionary';
-          if (!groups[dictName]) groups[dictName] = [];
-          groups[dictName].push(entry);
-      });
-      return groups;
-  }, [result]);
-
-  const uniqueTags = useMemo(() => {
-      const tags = new Set<string>();
-      result.entries.forEach(e => e.tags?.forEach(t => tags.add(t)));
-      return Array.from(tags);
-  }, [result]);
-
-  const primaryReading = result.entries[0]?.pronunciations?.[0]?.text;
+  
+  const activeResult = results[activeSegmentIndex];
 
   return (
     <div ref={ref} style={style} className="w-[320px] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col overflow-hidden animate-fade-in text-sm font-sans">
-        
-        {/* Top Bar: Result Switcher (Tabs) */}
-        {sortedResults.length > 1 && (
-            <div className="bg-gray-50 dark:bg-slate-800/80 px-2 py-1.5 border-b border-gray-200 dark:border-slate-700 flex gap-1 overflow-x-auto no-scrollbar whitespace-nowrap">
-                {sortedResults.map((r, idx) => (
+        <div className="p-2 border-b dark:border-slate-800 bg-slate-50 dark:bg-slate-900/30 flex items-center justify-between">
+            <div className="flex flex-wrap gap-1">
+                {results.map((res, index) => (
                     <button 
-                        key={`${r.word}-${idx}`} 
-                        onClick={() => onSelectResult && onSelectResult(r)}
-                        className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-colors ${
-                            r.word === result.word 
-                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' 
-                            : 'bg-white dark:bg-slate-700 border-gray-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-indigo-400 hover:text-indigo-500'
-                        }`}
+                        key={index}
+                        onClick={() => onSelectSegment(index)}
+                        className={`px-2 py-0.5 text-[10px] rounded transition-colors ${activeSegmentIndex === index ? 'bg-indigo-600 text-white font-bold' : 'bg-gray-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-100'}`}
                     >
-                        {r.word}
+                        {res.segment}
                     </button>
                 ))}
             </div>
-        )}
-
-        {/* Header Section */}
-        <div className="bg-white dark:bg-slate-900 p-3 pb-2 flex flex-col gap-1 border-b border-gray-100 dark:border-slate-800">
-            {/* Context Info (Reason) */}
-            {(originalText || deinflectionReason) && (
-                <div className="text-[10px] text-slate-400 flex items-center gap-1 mb-0.5">
-                    {originalText && <span className="font-mono bg-gray-100 dark:bg-slate-800 px-1 rounded text-slate-600 dark:text-slate-400">{originalText}</span>}
-                    {deinflectionReason && (
-                        <>
-                            <i className="fa-solid fa-arrow-right text-[8px] opacity-50"></i>
-                            <span className="italic truncate max-w-[180px]">{deinflectionReason}</span>
-                        </>
-                    )}
-                </div>
-            )}
-
-            <div className="flex justify-between items-start">
-                <div className="flex flex-col">
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-xl font-black text-slate-800 dark:text-white leading-none">{result.word}</span>
-                        {primaryReading && primaryReading !== result.word && (
-                            <span className="text-sm text-slate-500 dark:text-slate-400 font-normal">{primaryReading}</span>
-                        )}
-                    </div>
-                </div>
-                <button onClick={onClose} className="text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 -mt-1 -mr-1 p-1">
-                    <i className="fa-solid fa-times-circle"></i>
-                </button>
-            </div>
-
-            {/* Tags Row */}
-            {uniqueTags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                    {uniqueTags.map((tag, idx) => (
-                        <span key={idx} className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 text-[9px] font-bold uppercase rounded border border-indigo-100 dark:border-indigo-800/50">
-                            {tag}
-                        </span>
-                    ))}
-                </div>
-            )}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><i className="fa-solid fa-times text-xs"></i></button>
         </div>
         
-        {/* Dictionary Content */}
-        <div className="overflow-y-auto flex-1 p-0 bg-slate-50 dark:bg-slate-900/50">
-            {Object.entries(entriesByDict).map(([dictName, entries], idx) => (
-                <div key={idx} className="bg-white dark:bg-slate-900 mb-2 last:mb-0 p-3 shadow-sm border-b border-gray-100 dark:border-slate-800">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                        <i className="fa-solid fa-book-open"></i> {dictName}
-                    </div>
-                    <ul className="list-decimal pl-4 space-y-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-                        {(entries as DictionaryEntry[]).reduce((acc: any[], e) => acc.concat(e.senses), []).slice(0, 5).map((sense: any, sIdx: number) => {
-                            let defText = typeof sense.definition === 'string' ? sense.definition : 'Structured Content';
-                            try {
-                                if (defText.startsWith('{')) {
-                                    const parsed = JSON.parse(defText);
-                                    if (parsed.content) defText = Array.isArray(parsed.content) ? parsed.content.join(' ') : String(parsed.content);
-                                }
-                            } catch(e) {}
-                            
-                            return (
-                                <li key={sIdx}>
-                                    <span className="text-slate-800 dark:text-slate-200">{defText}</span>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                </div>
+        <div className="overflow-y-auto flex-1 bg-slate-100 dark:bg-slate-800">
+            {activeResult.foundWords.map((wordMatch, index) => (
+                <details key={index} open={index === 0}>
+                    <summary className="list-none cursor-pointer p-2 bg-white dark:bg-slate-900 border-b dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <div className="flex justify-between items-start">
+                           <div className="flex-1 min-w-0">
+                                <div className="flex items-baseline flex-wrap gap-x-2">
+                                    <h4 className="font-bold text-base text-slate-800 dark:text-white flex items-center gap-2">
+                                        <span>{wordMatch.result.word}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); onAddCard(wordMatch.result); }} className="text-slate-300 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 text-xs transition-colors">
+                                            <i className="fa-solid fa-plus-circle"></i>
+                                        </button>
+                                    </h4>
+                                    <div className="text-[9px] text-slate-500 dark:text-slate-400 font-mono space-x-1">
+                                        {wordMatch.source === 'direct' && <span>{t.sourceDirect}</span>}
+                                        {wordMatch.source === 'deinflected' && <span>{t.sourceDeinflected}</span>}
+                                        {wordMatch.source === 'reading' && <span>{t.sourceReading}</span>}
+                                        {wordMatch.secondarySource === 'reading' && <span>{t.sourceReading}</span>}
+                                    </div>
+                                    {wordMatch.source === 'deinflected' && (
+                                        <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">(← {activeResult.segment})</span>
+                                    )}
+                                </div>
+                                {wordMatch.result.entries?.[0]?.pronunciations?.[0]?.text && wordMatch.result.word !== wordMatch.result.entries[0].pronunciations[0].text && (
+                                    <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">[{wordMatch.result.entries[0].pronunciations[0].text}]</span>
+                                )}
+                           </div>
+                           {seenWords.has(wordMatch.result.word) && <span className="text-[9px] font-bold text-amber-500 bg-amber-100 dark:bg-amber-500/10 px-1.5 py-0.5 rounded-full self-center ml-2">{t.seen}</span>}
+                        </div>
+                    </summary>
+                    <WordDefinition wordMatch={wordMatch} onAddCard={onAddCard} isFirstDefinition={index === 0} />
+                </details>
             ))}
         </div>
 
-        {/* Action Footer */}
-        <div className="p-2 border-t border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex gap-2">
-            <button 
-                onClick={() => onAddCard(result)} 
-                className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-md transition-colors flex items-center justify-center gap-2"
-            >
-                <i className="fa-solid fa-plus-circle"></i> Add Card
-            </button>
-            <button 
-                onClick={() => navigator.clipboard.writeText(result.word)}
-                className="px-3 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-bold transition-colors"
-                title="Copy"
-            >
-                <i className="fa-solid fa-copy"></i>
+        <div className="p-2 border-t dark:border-slate-700 bg-white dark:bg-slate-900 flex gap-2">
+            <button disabled={activeResult.foundWords.length === 0} onClick={() => onAddAllCardsInTab(activeResult.foundWords.map(fw => fw.result))} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
+                <i className="fa-solid fa-layer-group"></i> {t.addAllInTab.replace('{count}', String(activeResult.foundWords.length))}
             </button>
         </div>
     </div>

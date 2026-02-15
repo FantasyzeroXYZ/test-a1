@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { AudioTrack, Language, LearningLanguage } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -238,7 +237,7 @@ export const Library: React.FC<LibraryProps> = ({
                         <button onClick={(e) => { e.stopPropagation(); onTrackDelete(track.id); }} className={`${circleActionBtn} hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-400/10`} title={t.delete}>
                           <i className="fa-solid fa-trash-can text-[10px]"></i>
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-400/10`} title="Edit">
+                        <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-400/10`} title={t.edit}>
                           <i className="fa-solid fa-pencil text-[10px]"></i>
                         </button>
                         <label onClick={e => e.stopPropagation()} className={`${circleActionBtn} hover:text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-400/10 cursor-pointer`} title={t.importSubs}>
@@ -299,7 +298,7 @@ export const Library: React.FC<LibraryProps> = ({
                   <button onClick={(e) => { e.stopPropagation(); onTrackDelete(track.id); }} className={`${circleActionBtn} hover:text-red-500`} title={t.delete}>
                     <i className="fa-solid fa-trash-can text-[10px]"></i>
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500`} title="Edit">
+                  <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500`} title={t.edit}>
                     <i className="fa-solid fa-pencil text-[10px]"></i>
                   </button>
                </div>
@@ -329,7 +328,7 @@ export const Library: React.FC<LibraryProps> = ({
                 type="text" 
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://..."
+                placeholder={t.urlPlaceholder}
                 className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-2xl p-4 text-slate-800 dark:text-white focus:border-indigo-500 outline-none mb-6 text-sm transition-all shadow-inner"
               />
               <div className="flex gap-3">
@@ -348,12 +347,12 @@ export const Library: React.FC<LibraryProps> = ({
                 <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-600/20 flex items-center justify-center text-amber-500 dark:text-amber-400">
                   <i className="fa-solid fa-pencil"></i>
                 </div>
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white">编辑条目信息</h3>
+                <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.editTrackInfo}</h3>
               </div>
               
               <div className="space-y-6">
                 <div>
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">封面图片</label>
+                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">{t.coverImage}</label>
                    <div className="flex gap-4 items-start">
                       <div className="w-24 h-24 rounded-2xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
                          {editingTrack.cover ? (
@@ -365,7 +364,7 @@ export const Library: React.FC<LibraryProps> = ({
                       <div className="flex-1 flex flex-col gap-2">
                           <label className="flex-1 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
                               <i className="fa-solid fa-upload"></i>
-                              上传/替换封面
+                              {t.uploadReplaceCover}
                               <input type="file" accept="image/*" className="hidden" onChange={handleCoverReplace} />
                           </label>
                           <button 
@@ -374,19 +373,19 @@ export const Library: React.FC<LibraryProps> = ({
                              className="flex-1 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                               <i className="fa-solid fa-download"></i>
-                              下载封面
+                              {t.downloadCover}
                           </button>
                       </div>
                    </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">显示名称</label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">{t.displayName}</label>
                   <input 
                     type="text" 
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder={editingTrack.filename?.replace(/\.[^/.]+$/, '') || "输入标题..."}
+                    placeholder={editingTrack.filename?.replace(/\.[^/.]+$/, '') || t.enterTitle}
                     className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-2xl p-4 text-slate-800 dark:text-white focus:border-amber-500 outline-none text-sm transition-all shadow-inner"
                   />
                 </div>
@@ -409,17 +408,17 @@ export const Library: React.FC<LibraryProps> = ({
                 </div>
 
                 <div className="pt-4 border-t border-gray-200 dark:border-slate-800">
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3 px-1">音频源</label>
+                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3 px-1">{t.audioSource}</label>
                    
                    {!!editingTrack.file ? (
                        <div className="bg-gray-50 dark:bg-slate-800/50 rounded-2xl p-4 border border-gray-200 dark:border-slate-700/50">
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-3 break-all flex items-center gap-2">
                             <i className="fa-solid fa-file-audio text-amber-500/50"></i>
-                            {editingTrack.filename || "本地文件"}
+                            {editingTrack.filename || t.localFile}
                           </p>
                           <label className="w-full py-2.5 bg-gray-200 dark:bg-slate-700 hover:bg-gray-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
                              <i className="fa-solid fa-rotate"></i>
-                             重新关联音频文件
+                             {t.reassociateFile}
                              <input type="file" accept=".mp3,.m4b,.m4a,audio/*" className="hidden" onChange={handleFileReplace} />
                           </label>
                        </div>
@@ -427,13 +426,13 @@ export const Library: React.FC<LibraryProps> = ({
                         <div className="bg-gray-50 dark:bg-slate-800/50 rounded-2xl p-4 border border-gray-200 dark:border-slate-700/50">
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-3 break-all flex items-center gap-2">
                             <i className="fa-solid fa-globe text-cyan-500/50"></i>
-                            网络链接
+                            {t.networkLink}
                           </p>
                           <input 
                             type="text" 
                             value={editUrl}
                             onChange={(e) => setEditUrl(e.target.value)}
-                            placeholder="https://..."
+                            placeholder={t.urlPlaceholder}
                             className="w-full bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-3 text-slate-800 dark:text-white focus:border-cyan-500 outline-none text-xs transition-all shadow-inner mb-2"
                           />
                         </div>

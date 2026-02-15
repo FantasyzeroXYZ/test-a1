@@ -15,53 +15,22 @@ import { SidePanel } from './components/SidePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { BookmarkModal } from './components/BookmarkModal';
 import { VocabListModal } from './components/VocabListModal';
-import { YomitanPopup } from './components/YomitanPopup';
+import { YomitanPopup, YomitanAnalysisResult } from './components/YomitanPopup';
+import { TranslationPopup } from './components/TranslationPopup';
+import { isNonSpacedLang } from './utils/textUtils';
+import { deinflector, DeinflectionResult, parseTransforms } from './utils/deinflector';
+// 引入日语处理工具和默认规则
+import { normalizeCombiningCharacters, convertKatakanaToHiragana, isStringPartiallyJapanese, convertHalfWidthKanaToFullWidth } from './utils/japanese';
+import { japaneseDeinflectionRules } from './utils/japaneseDeinflectionRules';
+import { englishDeinflectionRules } from './utils/englishDeinflectionRules';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
-  theme: 'light',
-  language: 'zh',
-  learningLanguage: 'en',
-  subtitleMode: 'scroll',
-  subtitleFontSize: 20,
-  segmentationMode: 'browser',
-  playbackMode: 'normal',
-  webSearchEngine: 'bing_trans',
-  webLinkMode: 'inline',
-  copyToClipboard: false,
-  dictMode: 'word',
-  dictExportMode: 'anki',
-  ankiBoldWord: true,
-  yomitanMode: false,
-  ttsEnabled: true,
-  ttsVoice: '',
-  ttsRate: 1,
-  ttsPitch: 1,
-  ttsVolume: 1,
-  keybindings: {
-    library: { import: 'KeyI', settings: 'KeyS' },
-    player: { playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD' },
-    dictionary: { close: 'Escape', addAnki: 'KeyA', replay: 'KeyR' }
-  },
+  theme: 'light', language: 'zh', learningLanguage: 'en', subtitleMode: 'scroll', subtitleFontSize: 20, segmentationMode: 'browser',
+  playbackMode: 'normal', webSearchEngine: 'bing_trans', webLinkMode: 'inline', copyToClipboard: false, dictMode: 'word',
+  dictExportMode: 'anki', ankiBoldWord: true, yomitanMode: false, yomitanModeType: 'comprehensive', enablePreprocessing: false,
+  ttsEnabled: true, ttsVoice: '', ttsRate: 1, ttsPitch: 1, ttsVolume: 1,
+  keybindings: { library: { import: 'KeyI', settings: 'KeyS' }, player: { playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD' }, dictionary: { close: 'Escape', addAnki: 'KeyA', replay: 'KeyR' } },
   inputSource: 'keyboard'
-};
-
-const loadConfig = <T,>(key: string, fallback: T): T => {
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? { ...fallback, ...JSON.parse(stored) } : fallback;
-  } catch (e) { return fallback; }
-};
-
-const findSubtitleIndex = (subtitles: SubtitleLine[], time: number): number => {
-  let low = 0, high = subtitles.length - 1;
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    const line = subtitles[mid];
-    if (time >= line.start && time < line.end) return mid;
-    if (time < line.start) high = mid - 1;
-    else low = mid + 1;
-  }
-  return -1;
 };
 
 const formatContentPlain = (content: any, depth: number = 0): string => {
@@ -100,605 +69,395 @@ const formatDefinitionForExport = (dictData: DictionaryResult): string => {
     return text.trim();
 };
 
+const formatSingleEntryForExport = (word: string, entry: DictionaryEntry): string => {
+    let text = `[${entry.partOfSpeech}]\n`;
+    entry.senses.forEach((s, sIdx) => {
+        let defContent = s.definition;
+        try {
+            if (typeof defContent === 'string' && defContent.trim().startsWith('{') && defContent.includes('"type":"structured-content"')) {
+                const parsed = JSON.parse(defContent);
+                defContent = formatContentPlain(parsed);
+            }
+        } catch (e) {}
+        text += `${sIdx + 1}. ${defContent}\n`;
+    });
+    return text.trim();
+};
+
 const App: React.FC = () => {
-  const [settings, setSettings] = useState<ReaderSettings>(() => loadConfig('lf_settings_v5', DEFAULT_SETTINGS));
-  const [ankiSettings, setAnkiSettings] = useState<AnkiSettings>(() => loadConfig('lf_anki', {
-    host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic',
-    fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '' },
-    sentenceFieldMap: {},
-    tags: 'linguaflow'
-  }));
+  const [settings, setSettings] = useState<ReaderSettings>(() => {
+    const stored = localStorage.getItem('lf_settings_v5');
+    return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : DEFAULT_SETTINGS;
+  });
+  const [ankiSettings, setAnkiSettings] = useState<AnkiSettings>(() => {
+    const stored = localStorage.getItem('lf_anki');
+    return stored ? JSON.parse(stored) : { host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic', fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '备注' }, tags: 'linguaflow' };
+  });
 
   const [view, setView] = useState<'library' | 'player'>('library');
   const t = getTranslation(settings.language);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showVocabTable, setShowVocabTable] = useState(false);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]); 
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(null);
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [subtitles, setSubtitles] = useState<SubtitleLine[]>([]);
-  const [secondarySubtitles, setSecondarySubtitles] = useState<SubtitleLine[]>([]);
-  const [activeSubtitleType, setActiveSubtitleType] = useState<'primary' | 'secondary'>('primary');
-  const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
   const [activeSubtitleIndex, setActiveSubtitleIndex] = useState<number>(-1);
-  
-  // Modals & Panels
-  const [showDictionaryModal, setShowDictionaryModal] = useState(false);
-  const [showSidePanel, setShowSidePanel] = useState(false);
-  const [showBookmarkModal, setShowBookmarkModal] = useState(false);
-  const [showFullSubList, setShowFullSubList] = useState(false);
-  const [showOffsetControl, setShowOffsetControl] = useState(false);
-  const [showVocabTable, setShowVocabTable] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
-  // New State: Subtitle Visibility
-  const [showSubtitles, setShowSubtitles] = useState(true);
+  const [yomitanPopup, setYomitanPopup] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    results: YomitanAnalysisResult[];
+    activeSegmentIndex: number;
+    highlight: { lineId: string; start: number; length: number };
+    pinned?: boolean;
+  } | null>(null);
 
-  // Toast State
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [translationPopup, setTranslationPopup] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    sentence: string;
+  } | null>(null);
 
-  // AB Loop & Sentence Repeat
-  const [loopA, setLoopA] = useState<number | null>(null);
-  const [loopB, setLoopB] = useState<number | null>(null);
-  const [isSentenceRepeat, setIsSentenceRepeat] = useState(false);
+  const [seenWords, setSeenWords] = useState(new Set<string>());
 
-  const [dictionaryTargetWord, setDictionaryTargetWord] = useState('');
-  const [dictionaryTargetIndex, setDictionaryTargetIndex] = useState(0);
-  const [dictionaryContext, setDictionaryContext] = useState<SubtitleLine>({id:'', start:0, end:0, text:''});
-  const [isOpeningTrack, setIsOpeningTrack] = useState(false);
-  const [wasPlayingBeforeModal, setWasPlayingBeforeModal] = useState(false);
-  const [hasDictionaries, setHasDictionaries] = useState(false);
-
-  // Yomitan Popup State
-  const [yomitanPopup, setYomitanPopup] = useState<{ visible: boolean; x: number; y: number; result?: DictionaryResult } | null>(null);
-
-  const currentTrack = useMemo(() => audioTracks.find(t => t.id === currentTrackId), [audioTracks, currentTrackId]);
-  const currentDisplaySubtitles = useMemo(() => activeSubtitleType === 'primary' ? subtitles : secondarySubtitles, [activeSubtitleType, subtitles, secondarySubtitles]);
-
-  // Derived state for segmentation: if dictMode is 'sentence', force 'none'
-  const effectiveSegmentationMode = useMemo(() => {
-      return settings.dictMode === 'sentence' ? 'none' : settings.segmentationMode;
-  }, [settings.dictMode, settings.segmentationMode]);
-
-  useEffect(() => { localStorage.setItem('lf_settings_v5', JSON.stringify(settings)); }, [settings]);
-  useEffect(() => { localStorage.setItem('lf_anki', JSON.stringify(ankiSettings)); }, [ankiSettings]);
-  
-  // Check if dictionaries exist for empty state UI
   useEffect(() => {
-    getDictionaries().then(dicts => setHasDictionaries(dicts.length > 0));
-  }, [showDictionaryModal, showSettings]); // Refresh when settings close (might have added/deleted dicts)
+      // Load default rules first
+      deinflector.load('ja', japaneseDeinflectionRules);
+      deinflector.load('en', englishDeinflectionRules);
 
-  // FIXED: Wrapped setAudioTracks in an arrow function to avoid potential second argument from Promise resolution
-  useEffect(() => { 
-    getAllTracksFromDB().then(tracks => setAudioTracks(tracks)); 
+      // Load user-provided custom rules, which may override defaults
+      const savedTransforms = localStorage.getItem('lf_transforms');
+      if (savedTransforms) {
+          const parsed = parseTransforms(savedTransforms);
+          if (parsed) deinflector.load(parsed.language, parsed);
+      }
   }, []);
 
-  // Theme application effect
-  useEffect(() => {
-    // Force remove first to ensure clean state
-    document.documentElement.classList.remove('dark');
-    if (settings.theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    }
-  }, [settings.theme]);
+  const scope = useMemo(() => {
+      const track = audioTracks.find(t => t.id === currentTrackId);
+      return track?.language || settings.learningLanguage;
+  }, [audioTracks, currentTrackId, settings.learningLanguage]);
 
-  // Update playback rate on audio element
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
-    }
-  }, [playbackRate]);
+  useEffect(() => { getAllTracksFromDB().then(setAudioTracks); }, []);
+  const safePause = useCallback(() => { audioRef.current?.pause(); setIsPlaying(false); }, []);
+  const safePlay = useCallback(async () => { try { await audioRef.current?.play(); setIsPlaying(true); } catch (e) {} }, []);
 
-  const showToast = (msg: string) => {
-      setToastMessage(msg);
-      setTimeout(() => setToastMessage(null), 3000);
-  };
-
-  const safePause = useCallback(() => { if (audioRef.current) { audioRef.current.pause(); setIsPlaying(false); } }, []);
-  const safePlay = useCallback(async () => { if (audioRef.current) { try { await audioRef.current.play(); setIsPlaying(true); } catch (err) {} } }, []);
-
-  const handleForward = useCallback(() => {
-    if (!audioRef.current) return;
-    const currTime = audioRef.current.currentTime;
-
-    // Logic: If before first subtitle, jump to start of first subtitle
-    if (currentDisplaySubtitles.length > 0) {
-        if (currTime < currentDisplaySubtitles[0].start) {
-            audioRef.current.currentTime = currentDisplaySubtitles[0].start;
-            return;
-        }
-    }
-
-    // Standard next sentence logic
-    if (activeSubtitleIndex < currentDisplaySubtitles.length - 1) {
-        audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex + 1].start;
-    }
-  }, [currentDisplaySubtitles, activeSubtitleIndex]);
-
-  const handleRewind = useCallback(() => {
-      if (!audioRef.current) return;
-      if (activeSubtitleIndex > 0) {
-          audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex - 1].start;
-      } else if (currentDisplaySubtitles.length > 0) {
-          // If at first subtitle or before, reset to 0 or start of first
-          audioRef.current.currentTime = currentDisplaySubtitles[0].start;
-      }
-  }, [currentDisplaySubtitles, activeSubtitleIndex]);
-
-  const handleGlobalKeyDown = useCallback((e: KeyboardEvent | { code: string, preventDefault: () => void }) => {
-    if (showSettings) return; 
-    if ('target' in e && ['INPUT', 'TEXTAREA'].includes(((e as KeyboardEvent).target as HTMLElement).tagName)) return;
-
-    if (showDictionaryModal) {
-      const kb = settings.keybindings.dictionary;
-      if (e.code === kb.close) { e.preventDefault(); setShowDictionaryModal(false); if (wasPlayingBeforeModal) safePlay(); }
-      return;
-    }
-
-    if (yomitanPopup?.visible) {
-        if (e.code === 'Escape') {
-            setYomitanPopup(null);
-            return;
-        }
-    }
-
-    if (view === 'player') {
-      const kb = settings.keybindings.player;
-      if (e.code === kb.playPause) { e.preventDefault(); isPlaying ? safePause() : safePlay(); }
-      if (e.code === kb.forward) { e.preventDefault(); handleForward(); }
-      if (e.code === kb.rewind) { e.preventDefault(); handleRewind(); }
-      if (e.code === kb.sidebar) { e.preventDefault(); setShowSidePanel(prev => !prev); }
-      if (e.code === kb.dict) { e.preventDefault(); if (activeSubtitleIndex !== -1) { 
-        const line = currentDisplaySubtitles[activeSubtitleIndex];
-        // For shortcut dictionary opening, respect mode
-        if (settings.dictMode === 'sentence') {
-            setDictionaryTargetWord(line.text);
-        } else {
-            setDictionaryTargetWord(line.text.split(' ')[0] || ''); // Fallback to first word or empty
-        }
-        setDictionaryTargetIndex(0);
-        setWasPlayingBeforeModal(isPlaying);
-        setDictionaryContext(line);
-        safePause();
-        setShowDictionaryModal(true);
-      } }
-    } else {
-        const kb = settings.keybindings.library;
-        if (e.code === kb.settings) { e.preventDefault(); setShowSettings(true); }
-    }
-  }, [view, showDictionaryModal, showSettings, settings, isPlaying, safePlay, safePause, activeSubtitleIndex, currentDisplaySubtitles, wasPlayingBeforeModal, handleForward, handleRewind, yomitanPopup]);
-
-  useEffect(() => {
-    const nativeHandler = (e: KeyboardEvent) => {
-        if (settings.inputSource === 'keyboard') {
-            handleGlobalKeyDown(e);
-        }
-    };
-    window.addEventListener('keydown', nativeHandler);
-    return () => window.removeEventListener('keydown', nativeHandler);
-  }, [handleGlobalKeyDown, settings.inputSource]);
-
-  // ... (Gamepad logic omitted for brevity as it's unchanged) ...
-
-  // Yomitan Instant Lookup Logic
-  const handleYomitanClick = async (event: React.MouseEvent, char: string, line: SubtitleLine, index: number) => {
-      // 1. Get the text starting from the clicked character
-      // Since `line.text` is a string and `index` is the char index in line array
-      const fullText = line.text;
-      // Note: `index` passed from SubtitleRenderer in yomitanMode is the index in the split array (chars), so it matches string index
-      const suffix = fullText.substring(index);
-      
-      // 2. Generate candidates (scan forward)
-      const maxScanLength = 15;
-      const candidates: string[] = [];
-      for (let i = 1; i <= Math.min(suffix.length, maxScanLength); i++) {
-          candidates.push(suffix.substring(0, i));
-      }
-
-      // 3. Search DB
-      // Scope: use track language or learning language setting
-      const scope = currentTrack?.language || settings.learningLanguage;
-      const results = await batchSearchTerms(candidates, scope);
-
-      if (results.length > 0) {
-          // Sort by length descending (longest match first)
-          results.sort((a, b) => b.word.length - a.word.length);
-          const bestMatch = results[0];
-          
-          setDictionaryContext(line); // Set context for saving later
-          setYomitanPopup({
-              visible: true,
-              x: event.clientX,
-              y: event.clientY,
-              result: bestMatch
-          });
-      } else {
-          // Optional: Show "No match" tooltip or nothing
-          // For now, let's show a toast or small indicator if needed, but standard yomitan behavior is usually silent if no match or deinflection fails
-          console.log("No match found for candidates:", candidates);
-      }
-  };
-
-  const handleYomitanAddCard = async (result: DictionaryResult) => {
-      // Logic adapted from DictionaryModal
-      const definition = formatDefinitionForExport(result);
-      const word = result.word;
-      
-      const allTags = new Set<string>();
-      result.entries.forEach(e => e.tags?.forEach(t => allTags.add(t)));
-      const examVocabContent = Array.from(allTags).join(' ');
-
-      const sentence = dictionaryContext.text;
-      const sent = settings.ankiBoldWord 
-        ? sentence.replace(word, `<b>${word}</b>`)
-        : sentence;
-
-      if (settings.dictExportMode === 'table') {
-          const tableKey = 'lf_vocab_table';
-          const raw = localStorage.getItem(tableKey);
-          const table = raw ? JSON.parse(raw) : [];
-          table.push({
-              id: crypto.randomUUID(),
-              word,
-              definition,
-              sentence: sent,
-              translation: '',
-              tags: examVocabContent,
-              sourceTitle: currentTrack?.title || 'Unknown',
-              timeRange: `${formatTime(dictionaryContext.start)} - ${formatTime(dictionaryContext.end)}`,
-              addedAt: Date.now()
-          });
-          localStorage.setItem(tableKey, JSON.stringify(table));
-          showToast("Added to Table");
-      } else {
-          // Anki
-          try {
-              let audioBase64 = undefined;
-              if (ankiSettings.fieldMap.audio && currentTrack?.file) {
-                  audioBase64 = await AnkiService.storeMediaFile(ankiSettings, `yomitan_audio_${Date.now()}.webm`, ""); // Dummy call or need real extract? 
-                  // Wait, extraction needs file access. extractAudioClip uses URL.createObjectURL(file)
-                  // We can't do await here easily without async blocking UI. 
-                  // Reusing extractAudioClip logic:
-                  // For instant popup, maybe skip audio or do it async?
-                  // Let's do it properly:
-                  /* Note: extractAudioClip is in utils/audioUtils and imported */
-                  // But we need the file. `currentTrack.file` exists.
-                  // We need to import `extractAudioClip` from utils/audioUtils (done in imports)
-              }
-              
-              // Actually implement audio extraction if possible
-              // const audioBase64 = ...
-              
-              // Simplification: Skip audio for quick add or implement if user really wants.
-              // Assuming user wants quick add.
-              
-              const isSentenceMode = settings.dictMode === 'sentence';
-              let effectiveFieldMap = ankiSettings.fieldMap;
-              if (isSentenceMode && ankiSettings.sentenceFieldMap && Object.keys(ankiSettings.sentenceFieldMap).length > 0) {
-                  effectiveFieldMap = { ...ankiSettings.fieldMap, ...ankiSettings.sentenceFieldMap };
-              }
-
-              const tempSettings: AnkiSettings = { ...ankiSettings, fieldMap: effectiveFieldMap as any };
-              
-              await AnkiService.addNote(tempSettings, {
-                  word,
-                  definition,
-                  sentence: sent,
-                  translation: '',
-                  examVocab: examVocabContent
-              });
-              showToast(t.ankiSuccess);
-          } catch (e) {
-              console.error(e);
-              alert(t.ankiError);
-          }
-      }
-      setYomitanPopup(null); // Close after add
-  };
-
-  // ... (rest of App logic, imports, handles, etc)
-
-  // Re-declare handles that were used in JSX
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setIsOpeningTrack(true);
     try {
-      const { chapters, coverBlob } = await parseChapters(file);
-      const id = crypto.randomUUID();
-      const newTrack: AudioTrack = {
-        id,
-        title: file.name.replace(/\.[^/.]+$/, ''),
-        filename: file.name,
-        url: URL.createObjectURL(file),
-        category,
-        file,
-        chapters,
-        coverBlob,
-        cover: coverBlob ? URL.createObjectURL(coverBlob) : undefined
-      };
-      await saveTrackToDB(newTrack, file);
-      setAudioTracks(prev => [...prev, newTrack]);
-    } catch (err) { console.error(err); } 
-    finally { setIsOpeningTrack(false); }
+        const { chapters, coverBlob } = await parseChapters(file);
+        const id = crypto.randomUUID();
+        const newTrack: AudioTrack = { id, title: file.name.replace(/\.[^/.]+$/, ''), filename: file.name, url: URL.createObjectURL(file), category, chapters, coverBlob, cover: coverBlob ? URL.createObjectURL(coverBlob) : undefined, updatedAt: Date.now(), file };
+        await saveTrackToDB(newTrack, file);
+        setAudioTracks(prev => [...prev, newTrack]);
+    } catch (err) { alert(t.importFailed); } finally { e.target.value = ''; }
   };
 
-  // ... (Other handlers like handleImportSubtitle, handleTimeUpdate etc. kept as is) ...
   const handleImportSubtitle = async (trackId: string, file: File, isSecondary: boolean) => {
-    // ... same implementation ...
-    const text = await file.text();
-    let parsed: SubtitleLine[] = [];
-    const ext = file.name.toLowerCase();
-    if (ext.endsWith('.srt')) parsed = parseSRT(text);
-    else if (ext.endsWith('.lrc')) parsed = parseLRC(text);
-    else if (ext.endsWith('.vtt')) parsed = parseVTT(text);
-    else if (ext.endsWith('.ass')) parsed = parseASS(text);
+    try {
+        const content = await file.text();
+        let parsedSubs: SubtitleLine[] = [];
+        const ext = file.name.split('.').pop()?.toLowerCase();
 
-    setAudioTracks(prev => prev.map(t => {
-      if (t.id === trackId) {
-        const updates = isSecondary ? { secondarySubtitles: parsed, secondarySubtitleFileName: file.name } : { subtitles: parsed, subtitleFileName: file.name };
-        updateTrackMetadataInDB(trackId, updates);
-        return { ...t, ...updates };
-      }
-      return t;
-    }));
+        if (ext === 'srt') {
+            parsedSubs = parseSRT(content);
+        } else if (ext === 'lrc') {
+            parsedSubs = parseLRC(content);
+        } else if (ext === 'vtt') {
+            parsedSubs = parseVTT(content);
+        } else if (ext === 'ass') {
+            parsedSubs = parseASS(content);
+        } else {
+            parsedSubs = parseSRT(content);
+            if (parsedSubs.length === 0) parsedSubs = parseLRC(content);
+        }
+
+        if (parsedSubs.length === 0) {
+            alert(t.subtitleParseError);
+            return;
+        }
+
+        const updates: Partial<AudioTrack> = isSecondary
+            ? { secondarySubtitles: parsedSubs, secondarySubtitleFileName: file.name }
+            : { subtitles: parsedSubs, subtitleFileName: file.name };
+
+        setAudioTracks(prev => prev.map(t => t.id === trackId ? { ...t, ...updates } : t));
+        await updateTrackMetadataInDB(trackId, updates);
+        
+        if (currentTrackId === trackId && !isSecondary) {
+            setSubtitles(parsedSubs);
+        }
+        alert(t.subtitleImportSuccess.replace('{filename}', file.name));
+    } catch (err) {
+        alert(t.importFailed);
+    }
   };
 
-  const handleTimeUpdate = () => {
-    if (!audioRef.current) return;
-    const curr = audioRef.current.currentTime;
-    setCurrentTime(curr);
-    if (loopA !== null && loopB !== null && curr >= loopB) audioRef.current.currentTime = loopA;
-    if (isSentenceRepeat && activeSubtitleIndex !== -1 && curr >= currentDisplaySubtitles[activeSubtitleIndex].end) audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex].start;
-    const newIdx = findSubtitleIndex(currentDisplaySubtitles, curr);
-    if (newIdx !== -1 && newIdx !== activeSubtitleIndex) setActiveSubtitleIndex(newIdx);
-  };
+  const performYomitanAnalysis = useCallback(async (event: React.MouseEvent, line: SubtitleLine, triggerIndex: number) => {
+    const learningLang = settings.learningLanguage;
+    const analysisResults: YomitanAnalysisResult[] = [];
+    
+    const scanSegments: { term: string, start: number }[] = [];
+    if (learningLang === 'en') {
+        const text = line.text;
+        let start = triggerIndex;
+        while (start > 0 && /\S/.test(text[start - 1])) {
+            start--;
+        }
+        let end = triggerIndex;
+        while (end < text.length - 1 && /\S/.test(text[end + 1])) {
+            end++;
+        }
+        const raw = text.substring(start, end + 1).replace(/[.,!?;:"'()]+$/, '');
+        if (raw) {
+            scanSegments.push({ term: raw, start: start });
+        }
+    } else { // Japanese, Chinese, etc.
+        const chars = Array.from(line.text);
+        const suffix = chars.slice(triggerIndex).join('');
+        const maxScanLen = 10;
+        for (let len = Math.min(suffix.length, maxScanLen); len >= 1; len--) {
+            scanSegments.push({ term: suffix.substring(0, len), start: triggerIndex });
+        }
+    }
 
-  const toggleABLoop = () => {
-      const curr = audioRef.current?.currentTime || 0;
-      if (loopA === null) setLoopA(curr);
-      else if (loopB === null) curr > loopA ? setLoopB(curr) : (setLoopA(null), setLoopB(null));
-      else { setLoopA(null); setLoopB(null); }
-  };
+    if (scanSegments.length === 0) {
+        setYomitanPopup(null);
+        return;
+    }
 
-  const toggleSentenceRepeat = () => {
-      setIsSentenceRepeat(prev => {
-          if (!prev && activeSubtitleIndex !== -1 && audioRef.current) audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex].start;
-          return !prev;
+    for (const segment of scanSegments) {
+        const raw = segment.term;
+        const foundWords: YomitanAnalysisResult['foundWords'] = [];
+        const termsToSearch = new Set<string>();
+        const deinflections: DeinflectionResult[] = [];
+        
+        termsToSearch.add(raw);
+        let hiragana = '';
+
+        if (learningLang === 'ja') {
+            const fullWidth = convertHalfWidthKanaToFullWidth(raw);
+            const normalized = normalizeCombiningCharacters(fullWidth);
+            termsToSearch.add(fullWidth);
+            termsToSearch.add(normalized);
+            
+            if (settings.enablePreprocessing || isStringPartiallyJapanese(raw)) {
+                hiragana = convertKatakanaToHiragana(normalized);
+                termsToSearch.add(hiragana);
+
+                const deinflectionResults = deinflector.deinflect(hiragana, 'ja');
+                deinflections.push(...deinflectionResults);
+                deinflectionResults.forEach(d => {
+                    termsToSearch.add(d.term);
+                    const deinflectedReading = convertKatakanaToHiragana(d.term);
+                    if (deinflectedReading !== d.term) termsToSearch.add(deinflectedReading);
+                });
+            }
+        } else if (learningLang === 'en') {
+            termsToSearch.add(raw.toLowerCase());
+            if (settings.enablePreprocessing) {
+                const deinflectionResults = deinflector.deinflect(raw.toLowerCase(), 'en');
+                deinflections.push(...deinflectionResults);
+                deinflectionResults.forEach(d => termsToSearch.add(d.term));
+            }
+        }
+
+        const searchResults = await batchSearchTerms(Array.from(termsToSearch), scope);
+
+        if (searchResults.length > 0) {
+            for (const res of searchResults) {
+                if (learningLang === 'ja') {
+                    if (raw === res.word || normalizeCombiningCharacters(raw) === res.word || hiragana === res.word) {
+                        foundWords.push({ result: res, source: 'direct' });
+                    } else {
+                        const deinflectedHeadwordMatch = deinflections.find(d => d.term === res.word || convertKatakanaToHiragana(d.term) === res.word);
+                        if (deinflectedHeadwordMatch) {
+                            foundWords.push({ result: res, source: 'deinflected', reason: deinflectedHeadwordMatch.reasons.join(' ← ') });
+                        } else if (hiragana && res.entries.some(e => e.pronunciations.some(p => p.text === hiragana))) {
+                            foundWords.push({ result: res, source: 'reading' });
+                        }
+                    }
+                } else if (learningLang === 'en') {
+                    if (res.word.toLowerCase() === raw.toLowerCase()) {
+                        foundWords.push({ result: res, source: 'direct' });
+                    } else {
+                        const match = deinflections.find(d => d.term === res.word);
+                        if (match) {
+                           foundWords.push({ result: res, source: 'deinflected', reason: match.reasons.join(' ← ') });
+                        }
+                    }
+                } else { // Chinese and others
+                    if (res.word === raw) {
+                        foundWords.push({ result: res, source: 'direct' });
+                    }
+                }
+            }
+        }
+
+        if (foundWords.length > 0) {
+            analysisResults.push({
+                segment: raw,
+                length: raw.length,
+                foundWords: [...new Map(foundWords.map(item => [item.result.word, item])).values()]
+            });
+            if (settings.yomitanModeType === 'fast' && learningLang !== 'en') {
+                break;
+            }
+        }
+    }
+
+    if (analysisResults.length > 0) {
+        const firstResult = analysisResults[0];
+        setYomitanPopup({
+            visible: true, x: event.clientX, y: event.clientY,
+            results: analysisResults,
+            activeSegmentIndex: 0,
+            highlight: { lineId: line.id, start: scanSegments[0].start, length: firstResult.length },
+            pinned: true,
+        });
+        if (firstResult.foundWords.length > 0) {
+            setSeenWords(prev => new Set(prev).add(firstResult.foundWords[0].result.word));
+        }
+    } else {
+        setYomitanPopup(null);
+    }
+  }, [scope, settings.learningLanguage, settings.enablePreprocessing, settings.yomitanModeType]);
+
+  const handleYomitanHover = useCallback((e: React.MouseEvent, char: string, line: SubtitleLine, idx: number) => {
+      return;
+  }, []);
+
+  const handleYomitanClick = useCallback((e: React.MouseEvent, char: string, line: SubtitleLine, idx: number) => {
+      performYomitanAnalysis(e, line, idx);
+  }, [performYomitanAnalysis]);
+  
+  const handleTranslateClick = (event: React.MouseEvent, line: SubtitleLine) => {
+      setTranslationPopup({
+          visible: true,
+          x: event.clientX,
+          y: event.clientY,
+          sentence: line.text,
       });
   };
 
-  const handleSaveBookmark = (bm: Bookmark) => {
-      if (currentTrackId) {
-          const updatedBookmarks = [...(currentTrack?.bookmarks || [])];
-          const existingIdx = updatedBookmarks.findIndex(b => b.id === bm.id);
-          if (existingIdx !== -1) updatedBookmarks[existingIdx] = bm;
-          else updatedBookmarks.push({...bm, id: crypto.randomUUID()});
-          setAudioTracks(prev => prev.map(t => t.id === currentTrackId ? {...t, bookmarks: updatedBookmarks} : t));
-          updateTrackMetadataInDB(currentTrackId, { bookmarks: updatedBookmarks });
+  const handleAddCard = async (result: DictionaryResult, entry?: DictionaryEntry) => {
+      const definition = entry ? formatSingleEntryForExport(result.word, entry) : formatDefinitionForExport(result);
+      const word = result.word;
+      const allTags = new Set<string>();
+      
+      const entriesToScan = entry ? [entry] : result.entries;
+      entriesToScan.forEach(e => e.tags?.forEach(t => allTags.add(t)));
+      
+      const line = yomitanPopup?.highlight ? subtitles.find(s => s.id === yomitanPopup.highlight!.lineId) : null;
+      const sentence = line?.text || "";
+      const sent = settings.ankiBoldWord ? sentence.replace(word, `<b>${word}</b>`) : sentence;
+
+      if (settings.dictExportMode === 'table') {
+          const raw = localStorage.getItem('lf_vocab_table');
+          const table = raw ? JSON.parse(raw) : [];
+          table.push({ id: crypto.randomUUID(), word, definition, sentence: sent, translation: '', tags: Array.from(allTags).join(' '), sourceTitle: audioTracks.find(t => t.id === currentTrackId)?.title || t.unknownSource, timeRange: line ? `${formatTime(line.start)}` : "0:00", addedAt: Date.now() });
+          localStorage.setItem('lf_vocab_table', JSON.stringify(table));
+          alert(t.addedToTable);
+      } else {
+          try {
+              let map = { ...ankiSettings.fieldMap };
+              if (settings.dictMode === 'sentence' && ankiSettings.sentenceFieldMap) map = { ...map, ...ankiSettings.sentenceFieldMap };
+              await AnkiService.addNote({ ...ankiSettings, fieldMap: map as any }, { word, definition, sentence: sent, translation: '', examVocab: Array.from(allTags).join(' ') });
+              alert(t.ankiSuccess);
+          } catch (e) { alert(t.ankiError); }
       }
-      setShowBookmarkModal(false);
+      setYomitanPopup(p => p ? {...p, pinned: false } : null); // Unpin after adding
   };
 
-  const deleteBookmark = (id: string) => {
-      if (currentTrackId && currentTrack) {
-          const updated = (currentTrack.bookmarks || []).filter(b => b.id !== id);
-          setAudioTracks(prev => prev.map(t => t.id === currentTrackId ? {...t, bookmarks: updated} : t));
-          updateTrackMetadataInDB(currentTrackId, { bookmarks: updated });
-      }
+  const handleAddAllCardsInTab = async (results: DictionaryResult[]) => {
+    for (const result of results) {
+        await handleAddCard(result);
+    }
   };
+  
+  const handleRewind = () => {
+    if (!audioRef.current || subtitles.length === 0) return;
+    const current = audioRef.current.currentTime;
+    const target = subtitles.slice().reverse().find(s => s.start < current - 0.5);
+    const newTime = target ? target.start : 0;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const handleForward = () => {
+    if (!audioRef.current || subtitles.length === 0) return;
+    const current = audioRef.current.currentTime;
+    const target = subtitles.find(s => s.start > current);
+    if (target) {
+        const newTime = target.start;
+        audioRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+    }
+  };
+
+  useEffect(() => {
+      if (subtitles.length === 0) return;
+      const idx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
+      if (idx !== -1 && idx !== activeSubtitleIndex) setActiveSubtitleIndex(idx);
+  }, [currentTime, subtitles, activeSubtitleIndex]);
 
   return (
-    <div className="fixed inset-0 h-[100dvh] w-full bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans select-none overflow-hidden transition-colors duration-300 flex flex-col">
-      <audio ref={audioRef} src={audioSrc || undefined} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(e) => {
-        setDuration(e.currentTarget.duration);
-        safePlay();
-      }} className="hidden" />
-      
-      {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-indigo-600 text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in-up font-bold text-sm flex items-center gap-2">
-            <i className="fa-solid fa-check-circle"></i> {toastMessage}
-        </div>
-      )}
-      
-      <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 h-16 shrink-0 z-50 transition-colors duration-300">
+    <div className="fixed inset-0 h-[100dvh] w-full bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex flex-col overflow-hidden transition-colors duration-300">
+      <audio ref={audioRef} src={audioSrc || undefined} onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} className="hidden" />
+      <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-800 border-b h-16 shrink-0 z-50">
          <div className="flex items-center gap-4">
-            <button onClick={() => { safePause(); setView('library'); }} className="w-8 h-8 bg-indigo-600 hover:bg-indigo-500 rounded-lg flex items-center justify-center transition-colors"><i className="fa-solid fa-chevron-left text-white text-sm"></i></button>
-            <h1 className="font-bold text-sm truncate max-w-[150px] md:max-w-xs">{view === 'player' ? (currentTrack?.title || "Player") : t.appTitle}</h1>
+            <button onClick={() => { safePause(); setView('library'); }} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center transition-colors"><i className="fa-solid fa-chevron-left text-sm"></i></button>
+            <h1 className="font-bold text-sm truncate max-w-[150px]">{view === 'player' ? audioTracks.find(t=>t.id===currentTrackId)?.title : t.appTitle}</h1>
          </div>
-         
-         <div className="flex items-center gap-1 md:gap-2">
-            {view === 'player' && (
-                <>
-                   {settings.dictExportMode === 'table' && (
-                       <button onClick={() => setShowVocabTable(true)} className="p-2 text-emerald-500 dark:text-emerald-400 hover:text-emerald-600 transition-colors" title="Vocabulary List">
-                          <i className="fa-solid fa-table"></i>
-                       </button>
-                   )}
-                  <button onClick={() => setShowOffsetControl(prev => !prev)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors" title={t.adjustTiming}>
-                     <i className="fa-solid fa-clock-rotate-left"></i>
-                  </button>
-                  <button onClick={() => setShowFullSubList(true)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors" title="Subtitle List">
-                     <i className="fa-solid fa-list-ul"></i>
-                  </button>
-                  <button onClick={() => { safePause(); setShowBookmarkModal(true); }} className="p-2 text-slate-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors" title={t.addBookmark}>
-                     <i className="fa-solid fa-bookmark"></i>
-                  </button>
-                  <div className="w-px h-4 bg-gray-300 dark:bg-slate-700 mx-1"></div>
-                </>
-            )}
-            <button onClick={() => setShowSettings(true)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors"><i className="fa-solid fa-cog text-lg"></i></button>
+         <div className="flex items-center gap-2">
+            <button onClick={() => setShowVocabTable(true)} className="p-2 text-emerald-500 hover:text-emerald-600 transition-colors"><i className="fa-solid fa-table"></i></button>
+            <button onClick={() => setShowSettings(true)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors"><i className="fa-solid fa-cog"></i></button>
          </div>
       </header>
-
-      {/* Offset Control Overlay */}
-      {showOffsetControl && view === 'player' && (
-          <div className="absolute top-16 left-0 right-0 z-40 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md p-2 flex justify-center border-b border-indigo-500/20">
-              <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{t.adjustTiming}</span>
-                  <button onClick={() => { /* implementation needed in renderer, simplified here */ }} className="px-2 py-0.5 bg-gray-200 dark:bg-slate-700 rounded text-xs">-0.5s</button>
-                  <button onClick={() => { }} className="px-2 py-0.5 bg-gray-200 dark:bg-slate-700 rounded text-xs">+0.5s</button>
-              </div>
-          </div>
-      )}
-
       <div className="flex-1 overflow-hidden relative">
          {view === 'library' ? (
-           <Library 
-              tracks={audioTracks} 
-              onTrackSelect={track => { setCurrentTrackId(track.id); setAudioSrc(track.url); setSubtitles(track.subtitles || []); setView('player'); }} 
-              onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} 
-              onTrackUpdate={(id, updates) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...updates} : t)); updateTrackMetadataInDB(id, updates); }} 
-              onImport={handleImport} 
-              onReplaceFile={()=>{}} 
-              onImportLink={()=>{}} 
-              onImportSubtitle={handleImportSubtitle} 
-              language={settings.language} 
-           />
+           <Library tracks={audioTracks} onTrackSelect={track => { setCurrentTrackId(track.id); setAudioSrc(track.url); setSubtitles(track.subtitles || []); setView('player'); setTimeout(safePlay, 100); }} language={settings.language} onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} onTrackUpdate={(id, up) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...up} : t)); updateTrackMetadataInDB(id, up); }} onImport={handleImport} onReplaceFile={()=>{}} onImportLink={()=>{}} onImportSubtitle={handleImportSubtitle} />
          ) : (
            <div className="flex-1 flex flex-col h-full relative">
-              <SubtitleRenderer 
-                subtitles={currentDisplaySubtitles} 
-                activeSubtitleIndex={activeSubtitleIndex} 
-                onSeek={t => { if(audioRef.current) audioRef.current.currentTime=t; }} 
-                gameType="none" 
-                language={settings.language} 
-                learningLanguage={settings.learningLanguage} 
-                fontSize={settings.subtitleFontSize} 
-                onWordClick={(word, line, index) => { 
-                    setWasPlayingBeforeModal(isPlaying); 
-                    safePause(); 
-                    if (settings.dictMode === 'sentence') {
-                        setDictionaryTargetWord(line.text); 
-                    } else {
-                        setDictionaryTargetWord(word); 
-                    }
-                    setDictionaryTargetIndex(index); 
-                    setDictionaryContext(line); 
-                    setShowDictionaryModal(true); 
-                    if(settings.copyToClipboard) navigator.clipboard.writeText(settings.dictMode === 'sentence' ? line.text : word);
-                }} 
-                onTextClick={handleYomitanClick}
-                segmentationMode={effectiveSegmentationMode} 
-                onAutoSegment={()=>{}} 
-                isScanning={false} 
-                onShiftTimeline={()=>{}} 
-                subtitleMode={settings.subtitleMode}
-                showSubtitles={showSubtitles}
-                yomitanMode={settings.yomitanMode} 
-              />
-              
-              {/* Full List Overlay */}
-              {showFullSubList && (
-                <div className="absolute inset-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl flex flex-col animate-fade-in transition-colors">
-                  <div className="p-4 border-b border-gray-200 dark:border-white/10 flex justify-between items-center bg-gray-50 dark:bg-slate-900 shrink-0">
-                    <h3 className="font-black text-xs uppercase tracking-widest text-indigo-500 dark:text-indigo-400">Subtitle List</h3>
-                    <input type="text" placeholder="Search..." className="mx-4 flex-1 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded px-2 py-1 text-xs outline-none" />
-                    <button onClick={() => setShowFullSubList(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors">✕</button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-1 no-scrollbar">
-                    {currentDisplaySubtitles.map((line, idx) => (
-                      <div 
-                        key={line.id} 
-                        onClick={() => { if(audioRef.current) audioRef.current.currentTime = line.start; setShowFullSubList(false); }}
-                        className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${idx === activeSubtitleIndex ? 'bg-indigo-600 text-white shadow-lg' : 'hover:bg-gray-100 dark:hover:bg-white/5 text-slate-500 dark:text-slate-400'}`}
-                      >
-                        <span className="text-[9px] opacity-50 font-mono w-12 shrink-0">{formatTime(line.start)}</span>
-                        <span className="text-sm truncate">{line.text || `Segment ${idx}`}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Yomitan Popup */}
-              {yomitanPopup && yomitanPopup.visible && yomitanPopup.result && (
+              <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) audioRef.current.currentTime=t; }} gameType="none" language={settings.language} learningLanguage={settings.learningLanguage} fontSize={settings.subtitleFontSize} onWordClick={()=>{}} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} />
+              {yomitanPopup && yomitanPopup.visible && (
                   <YomitanPopup 
-                      position={{ x: yomitanPopup.x, y: yomitanPopup.y }}
-                      result={yomitanPopup.result}
-                      onClose={() => setYomitanPopup(null)}
-                      onAddCard={handleYomitanAddCard}
-                      isLoading={false}
+                    position={{ x: yomitanPopup.x, y: yomitanPopup.y }} 
+                    results={yomitanPopup.results}
+                    activeSegmentIndex={yomitanPopup.activeSegmentIndex}
+                    onSelectSegment={(index) => setYomitanPopup(p => p ? {...p, activeSegmentIndex: index} : null)}
+                    onClose={() => setYomitanPopup(null)} 
+                    onAddCard={handleAddCard}
+                    onAddAllCardsInTab={handleAddAllCardsInTab}
+                    seenWords={seenWords}
+                    t={t}
                   />
               )}
-
-              <PlayerControls 
-                isPlaying={isPlaying} 
-                currentTime={currentTime} 
-                duration={duration} 
-                playbackRate={playbackRate} 
-                onPlayPause={() => isPlaying ? safePause() : safePlay()} 
-                onSeek={t => { if(audioRef.current) audioRef.current.currentTime=t; }} 
-                onForward={handleForward} 
-                onRewind={handleRewind} 
-                onReplay={() => { if(activeSubtitleIndex !== -1 && audioRef.current) audioRef.current.currentTime = currentDisplaySubtitles[activeSubtitleIndex].start; }} 
-                onRateChange={(r) => setPlaybackRate(r)} 
-                onABLoopToggle={toggleABLoop} 
-                loopA={loopA} loopB={loopB} 
-                isSentenceRepeat={isSentenceRepeat} 
-                onSentenceRepeatToggle={toggleSentenceRepeat} 
-                language={settings.language} 
-                hasSecondarySubtitles={secondarySubtitles.length > 0} 
-                onToggleSubtitleType={() => setActiveSubtitleType(p => p === 'primary' ? 'secondary' : 'primary')} 
-                activeSubtitleType={activeSubtitleType} 
-                onSaveBookmark={()=>{}} 
-                ttsEnabled={settings.ttsEnabled}
-                onTTSToggle={() => setSettings({...settings, ttsEnabled: !settings.ttsEnabled})}
-                onToggleSidePanel={() => setShowSidePanel(prev => !prev)}
-                showSubtitles={showSubtitles}
-                onToggleShowSubtitles={() => setShowSubtitles(prev => !prev)}
-              />
+              {translationPopup && translationPopup.visible && (
+                  <TranslationPopup
+                      position={{ x: translationPopup.x, y: translationPopup.y }}
+                      sentence={translationPopup.sentence}
+                      onClose={() => setTranslationPopup(null)}
+                      t={t}
+                      initialEngine={settings.webSearchEngine}
+                      language={settings.language}
+                  />
+              )}
+              <PlayerControls isPlaying={isPlaying} currentTime={currentTime} duration={duration} playbackRate={1} onPlayPause={() => isPlaying ? safePause() : safePlay()} onSeek={t => { if(audioRef.current) audioRef.current.currentTime=t; setCurrentTime(t); }} onForward={handleForward} onRewind={handleRewind} onReplay={()=>{}} onRateChange={()=>{}} onABLoopToggle={()=>{}} loopA={null} loopB={null} isSentenceRepeat={false} onSentenceRepeatToggle={()=>{}} language={settings.language} hasSecondarySubtitles={false} onToggleSubtitleType={()=>{}} activeSubtitleType="primary" onSaveBookmark={()=>{}} ttsEnabled={false} onTTSToggle={()=>{}} onToggleSidePanel={()=>{}} />
            </div>
          )}
       </div>
-
-      <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} language={settings.language} setLanguage={l => setSettings({...settings, language: l})} learningLanguage={settings.learningLanguage} setLearningLanguage={l => setSettings({...settings, learningLanguage: l})} readerSettings={settings} setReaderSettings={setSettings} ankiSettings={ankiSettings} setAnkiSettings={setAnkiSettings} subtitleMode={settings.subtitleMode} setSubtitleMode={m => setSettings({...settings, subtitleMode: m})} subtitleFontSize={settings.subtitleFontSize} setSubtitleFontSize={s => setSettings({...settings, subtitleFontSize: s})} segmentationMode={settings.segmentationMode} setSegmentationMode={m => setSettings({...settings, segmentationMode: m})} webSearchEngine={settings.webSearchEngine} setWebSearchEngine={e => setSettings({...settings, webSearchEngine: e})} />
-      
-      <DictionaryModal 
-        isOpen={showDictionaryModal} 
-        onClose={() => { setShowDictionaryModal(false); if (wasPlayingBeforeModal) safePlay(); }} 
-        initialWord={dictionaryTargetWord} initialSegmentIndex={dictionaryTargetIndex} sentence={dictionaryContext.text} contextLine={dictionaryContext} 
-        language={settings.language} learningLanguage={settings.learningLanguage} ankiSettings={ankiSettings} segmentationMode={settings.segmentationMode} webSearchEngine={settings.webSearchEngine} currentTrack={currentTrack} audioRef={audioRef} 
-        ttsSettings={{ enabled: settings.ttsEnabled, rate: settings.ttsRate, pitch: settings.ttsPitch, volume: settings.ttsVolume, voice: settings.ttsVoice }}
-        settings={settings}
-        setSettings={setSettings}
-        hasDictionaries={hasDictionaries}
-        onAnkiSuccess={() => showToast(t.ankiSuccess)}
-        onTableSuccess={() => showToast("已添加到生词表 (Added to Table)")}
-      />
-      
-      <SidePanel 
-        isOpen={showSidePanel} 
-        onClose={() => setShowSidePanel(false)} 
-        chapters={currentTrack?.chapters || []} 
-        bookmarks={currentTrack?.bookmarks || []} 
-        onSeek={t => { if(audioRef.current) audioRef.current.currentTime=t; }} 
-        onDeleteBookmark={deleteBookmark} 
-        onEditBookmark={(bm) => { setShowBookmarkModal(true); }}
-        language={settings.language}
-        currentTrack={currentTrack}
-      />
-
-      <BookmarkModal 
-        isOpen={showBookmarkModal}
-        onClose={() => setShowBookmarkModal(false)}
-        currentTime={currentTime}
-        currentTrackTitle={currentTrack?.title || "Unknown Track"}
-        onSave={handleSaveBookmark}
-        language={settings.language}
-      />
-      
-      <VocabListModal 
-         isOpen={showVocabTable}
-         onClose={() => setShowVocabTable(false)}
-         language={settings.language}
-         onUpdate={() => {}}
-      />
-
-      {isOpeningTrack && <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl"><div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>}
+      <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} language={settings.language} setLanguage={l=>setSettings({...settings, language:l})} learningLanguage={settings.learningLanguage} setLearningLanguage={l=>setSettings({...settings, learningLanguage:l})} readerSettings={settings} setReaderSettings={setSettings} ankiSettings={ankiSettings} setAnkiSettings={setAnkiSettings} subtitleMode={settings.subtitleMode} setSubtitleMode={m=>setSettings({...settings, subtitleMode:m})} subtitleFontSize={settings.subtitleFontSize} setSubtitleFontSize={s=>setSettings({...settings, subtitleFontSize:s})} segmentationMode={settings.segmentationMode} setSegmentationMode={m=>setSettings({...settings, segmentationMode:m})} webSearchEngine={settings.webSearchEngine} setWebSearchEngine={e=>setSettings({...settings, webSearchEngine:e})} />
+      <VocabListModal isOpen={showVocabTable} onClose={() => setShowVocabTable(false)} language={settings.language} onUpdate={() => {}} />
     </div>
   );
 };

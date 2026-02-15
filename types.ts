@@ -106,6 +106,8 @@ export type WebLinkMode = 'inline' | 'external';
 
 export type InputSource = 'keyboard' | 'gamepad';
 
+export type YomitanModeType = 'fast' | 'comprehensive';
+
 export interface SceneKeybindings {
   library: Record<string, string>;
   player: Record<string, string>;
@@ -127,6 +129,8 @@ export interface ReaderSettings {
   dictExportMode: 'anki' | 'table'; // New: Controls export destination
   ankiBoldWord: boolean; // New: Controls if target word is bolded in sentence
   yomitanMode: boolean; // New: Yomitan-style instant lookup
+  yomitanModeType: YomitanModeType; // New: 'fast' or 'comprehensive'
+  enablePreprocessing: boolean; // New: Enable/Disable text preprocessing
   ttsEnabled: boolean;
   ttsVoice: string;
   ttsRate: number;

@@ -1,11 +1,11 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Language, SubtitleMode, SceneKeybindings, GameType, LearningLanguage, AnkiSettings, SegmentationMode, PlaybackMode, WebSearchEngine, ReaderSettings, Theme, InputSource } from '../types';
+import { Language, SubtitleMode, SceneKeybindings, GameType, LearningLanguage, AnkiSettings, SegmentationMode, PlaybackMode, WebSearchEngine, ReaderSettings, Theme, InputSource, YomitanModeType } from '../types';
 import { getTranslation } from '../utils/i18n';
 import * as AnkiService from '../services/ankiService';
 import { clearAllDataFromDB, saveDictionaryBatch, LocalDictEntry, DictionaryMeta, saveDictionaryMeta, getDictionaries, deleteDictionary, updateDictionary } from '../utils/storage';
 import { DEFAULT_KEY_BINDINGS } from '../constants';
 import { downloadFile } from '../utils/parsers';
+import { deinflector, parseTransforms } from '../utils/deinflector';
 
 // Add declaration for external JSZip library
 declare const JSZip: any;
@@ -191,7 +191,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const restoreDefaultKeybindings = () => {
-      if (confirm("Reset all shortcuts to default?")) {
+      if (confirm(t.resetShortcutsConfirm)) {
            const defaults: SceneKeybindings = {
              library: { import: 'KeyI', settings: 'KeyS' },
              player: { playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD' },
@@ -206,7 +206,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     if (!file) return;
 
     if (typeof JSZip === 'undefined') {
-        alert("JSZip library not loaded. Please refresh.");
+        alert(t.jszipError);
         return;
     }
 
@@ -234,7 +234,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         const files = Object.keys(zip.files).filter(f => f.includes(filePattern) && f.endsWith('.json'));
         
         if (files.length === 0) {
-            alert(`No ${filePattern} files found. Please check dictionary type selection.`);
+            alert(t.dictFileNotFound.replace('{filePattern}', filePattern));
             setIsImportingDict(false);
             setImportProgress('');
             return;
@@ -318,12 +318,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             importedAt: Date.now()
         });
         
-        alert(`词典 "${dictTitle}" (${dictImportType === 'definition' ? '释义' : '标签'}) 导入成功！\n共导入 ${totalCount} 条目。`);
+        const typeStr = dictImportType === 'definition' ? t.dictTypeDefinition : t.dictTypeTag;
+        alert(t.dictImportSuccess.replace('{title}', dictTitle).replace('{type}', typeStr).replace('{count}', String(totalCount)));
         await refreshDictionaries();
 
     } catch (err) {
         console.error(err);
-        alert(`导入失败: ${err}`);
+        alert(t.dictImportFailed.replace('{error}', String(err)));
     } finally {
         setIsImportingDict(false);
         setImportProgress('');
@@ -331,8 +332,33 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  const handleTransformImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+          try {
+              const content = ev.target?.result as string;
+              // Validate parsing before saving
+              const parsed = parseTransforms(content);
+              if (parsed) {
+                  localStorage.setItem('lf_transforms', content);
+                  deinflector.load(parsed.language, parsed);
+                  alert(t.transformLoadSuccess);
+              } else {
+                  alert(t.transformParseError);
+              }
+          } catch (err) {
+              alert(t.transformReadError);
+          }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+  };
+
   const handleDeleteDictionary = async (id: string, name: string) => {
-      if (confirm(`确定要删除词典 "${name}" 吗？此操作不可恢复。`)) {
+      if (confirm(t.confirmDeleteDict.replace('{name}', name))) {
           await deleteDictionary(id);
           await refreshDictionaries();
       }
@@ -553,8 +579,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                            onChange={(e) => setDictImportType(e.target.value as DictImportType)}
                            className="flex-1 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-1.5 rounded border border-gray-300 dark:border-slate-700 outline-none"
                         >
-                            <option value="definition">释义词典</option>
-                            <option value="tag">标签词典</option>
+                            <option value="definition">{t.dictTypeDefinition}</option>
+                            <option value="tag">{t.dictTypeTag}</option>
                         </select>
                         <select 
                            value={dictImportScope} 
@@ -572,13 +598,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                </div>
                
-               {/* Toggle for Instant Lookup (Yomitan Mode) */}
-               <div className="flex items-center justify-between pb-2 border-b border-gray-200 dark:border-slate-700">
-                  <div className="flex flex-col">
-                      <span className="text-sm text-slate-700 dark:text-slate-300 font-bold">Instant Lookup (Yomitan Mode)</span>
-                      <span className="text-[10px] text-slate-500">Scan text on click without segmentation</span>
+               <div className="flex flex-col gap-2 pb-2 border-b border-gray-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between">
+                        <div className="flex flex-col">
+                            <span className="text-sm text-slate-700 dark:text-slate-300 font-bold">{t.instantLookup}</span>
+                            <span className="text-[10px] text-slate-500">{t.instantLookupDesc}</span>
+                        </div>
+                        <input type="checkbox" checked={readerSettings.yomitanMode} onChange={e => setReaderSettings({...readerSettings, yomitanMode: e.target.checked})} className="accent-indigo-600" />
+                    </div>
+                    {readerSettings.yomitanMode && (
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.lookupMode}</label>
+                            <select 
+                                value={readerSettings.yomitanModeType} 
+                                onChange={e => setReaderSettings({...readerSettings, yomitanModeType: e.target.value as YomitanModeType})}
+                                className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none"
+                            >
+                                <option value="fast">{t.lookupFast}</option>
+                                <option value="comprehensive">{t.lookupComprehensive}</option>
+                            </select>
+                        </div>
+                    )}
+               </div>
+
+               {/* New: Text Processing Section */}
+               <div className="flex flex-col gap-2 pb-2 border-b border-gray-200 dark:border-slate-700">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">{t.textAnalysis}</label>
+                  <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-700 dark:text-slate-300">{t.enablePreprocessing}</span>
+                      <input type="checkbox" checked={readerSettings.enablePreprocessing} onChange={e => setReaderSettings({...readerSettings, enablePreprocessing: e.target.checked})} className="accent-indigo-600" />
                   </div>
-                  <input type="checkbox" checked={readerSettings.yomitanMode} onChange={e => setReaderSettings({...readerSettings, yomitanMode: e.target.checked})} className="accent-indigo-600" />
+                  <div className="flex flex-col gap-1 mt-1">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{t.importGrammar}</span>
+                      <input type="file" accept=".js" onChange={handleTransformImport} className="text-xs text-slate-500 dark:text-slate-400" />
+                  </div>
                </div>
 
                {/* Management Section */}
@@ -591,8 +644,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                onChange={(e) => setViewDictLang(e.target.value)}
                                className="bg-transparent text-[10px] text-slate-500 font-bold border-none outline-none cursor-pointer max-w-[80px]"
                            >
-                               <option value="all">All Langs</option>
-                               <option value="universal">Universal</option>
+                               <option value="all">{t.allLangs}</option>
+                               <option value="universal">{t.dictLangUniversal}</option>
                                {learningLanguages.map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
                            </select>
                            <select 
@@ -607,7 +660,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                    </div>
                    
                    {dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang)).length === 0 ? (
-                       <p className="text-xs text-slate-400 italic">暂无{viewDictType === 'definition' ? '释义' : '标签'}词典</p>
+                       <p className="text-xs text-slate-400 italic">{t.noDictsFound.replace('{type}', viewDictType === 'definition' ? t.dictTypeDefinition : t.dictTypeTag)}</p>
                    ) : (
                        <div className="space-y-2">
                            {dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang)).map((dict, idx) => (
@@ -632,7 +685,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                        </div>
                                    </div>
                                    <div className="flex items-center gap-2">
-                                       <span className="text-[10px] text-slate-400">{dict.count} entries</span>
+                                       <span className="text-[10px] text-slate-400">{t.nItems.replace('{count}', String(dict.count))}</span>
                                        <select 
                                            value={dict.scope} 
                                            onChange={(e) => handleScopeChange(dict.id, e.target.value)}
@@ -683,7 +736,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <div>
                             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ttsVoice}</label>
                             <select value={readerSettings.ttsVoice} onChange={(e) => setReaderSettings({...readerSettings, ttsVoice: e.target.value})} className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors">
-                                <option value="">Default</option>
+                                <option value="">{t.ttsDefault}</option>
                                 {voices.map(v => (
                                     <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
                                 ))}
@@ -732,7 +785,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         className={`px-3 py-1 text-[10px] rounded transition-all ${readerSettings.inputSource === 'keyboard' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'} disabled:opacity-50`}
                       >
                           <i className="fa-solid fa-keyboard mr-1"></i>
-                          Keyboard
+                          {t.keyboard}
                       </button>
                       <button 
                         onClick={() => !isKeyBindingActive && setReaderSettings({...readerSettings, inputSource: 'gamepad'})}
@@ -740,20 +793,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         className={`px-3 py-1 text-[10px] rounded transition-all ${readerSettings.inputSource === 'gamepad' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'} disabled:opacity-50`}
                       >
                           <i className="fa-solid fa-gamepad mr-1"></i>
-                          Gamepad
+                          {t.gamepad}
                       </button>
                   </div>
                   
                   <div className="flex gap-2">
                        {!isKeyBindingActive ? (
                            <>
-                             <button onClick={restoreDefaultKeybindings} className="px-3 py-1 bg-gray-200 dark:bg-slate-700 text-[10px] rounded text-slate-600 dark:text-slate-300 hover:bg-gray-300 dark:hover:bg-slate-600">Default</button>
-                             <button onClick={() => setIsKeyBindingActive(true)} className="px-3 py-1 bg-indigo-600 text-[10px] rounded text-white font-bold hover:bg-indigo-500 shadow">Start Config</button>
+                             <button onClick={restoreDefaultKeybindings} className="px-3 py-1 bg-gray-200 dark:bg-slate-700 text-[10px] rounded text-slate-600 dark:text-slate-300 hover:bg-gray-300 dark:hover:bg-slate-600">{t.restoreDefaults}</button>
+                             <button onClick={() => setIsKeyBindingActive(true)} className="px-3 py-1 bg-indigo-600 text-[10px] rounded text-white font-bold hover:bg-indigo-500 shadow">{t.startConfig}</button>
                            </>
                        ) : (
                            <>
-                             <button onClick={cancelAllKeybindingChanges} className="px-3 py-1 bg-gray-200 dark:bg-slate-700 text-[10px] rounded text-slate-600 dark:text-slate-300 hover:bg-gray-300 dark:hover:bg-slate-600">Cancel</button>
-                             <button onClick={applyKeybindings} className="px-3 py-1 bg-green-600 text-[10px] rounded text-white font-bold hover:bg-green-500 shadow">Confirm</button>
+                             <button onClick={cancelAllKeybindingChanges} className="px-3 py-1 bg-gray-200 dark:bg-slate-700 text-[10px] rounded text-slate-600 dark:text-slate-300 hover:bg-gray-300 dark:hover:bg-slate-600">{t.cancel}</button>
+                             <button onClick={applyKeybindings} className="px-3 py-1 bg-green-600 text-[10px] rounded text-white font-bold hover:bg-green-500 shadow">{t.confirm}</button>
                            </>
                        )}
                   </div>
@@ -778,7 +831,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                 onClick={() => isMappingThis ? cancelBinding() : startBindingAction(shortcutScene, key)}
                                 className={`min-w-[80px] px-2 py-1.5 rounded text-[10px] font-mono border transition-colors ${isMappingThis ? 'bg-indigo-600 border-indigo-400 text-white animate-pulse' : 'bg-white dark:bg-slate-900 border-gray-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}
                               >
-                                {isMappingThis ? 'Press Key...' : (currentBind || 'None')}
+                                {isMappingThis ? t.pressKeyToBind : (currentBind || t.none)}
                               </button>
                               {isMappingThis ? (
                                   <button onClick={cancelBinding} className="w-6 h-6 flex items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30 text-red-500 hover:bg-red-200"><i className="fa-solid fa-xmark text-[10px]"></i></button>
@@ -788,7 +841,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           </div>
                       ) : (
                           <span className="min-w-[80px] px-2 py-1.5 text-right text-[10px] font-mono text-slate-500 dark:text-slate-400">
-                             {currentBind || 'None'}
+                             {currentBind || t.none}
                           </span>
                       )}
                     </div>
@@ -837,7 +890,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                        
                        <div>
                            <div className="flex items-center justify-between mb-3">
-                               <label className="text-[10px] font-bold text-indigo-500 uppercase">Field Mapping</label>
+                               <label className="text-[10px] font-bold text-indigo-500 uppercase">{t.fieldMapping}</label>
                                <div className="flex bg-gray-100 dark:bg-slate-900 rounded p-0.5 border border-gray-200 dark:border-slate-700">
                                    <button 
                                       onClick={() => setAnkiConfigMode('word')} 
@@ -863,7 +916,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                           onChange={(e) => updateAnkiField(fieldType, e.target.value)} 
                                           className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-1.5 rounded outline-none text-xs"
                                        >
-                                           <option value="">(None)</option>
+                                           <option value="">{t.none}</option>
                                            {ankiFields.map(f => <option key={f} value={f}>{f}</option>)}
                                        </select>
                                    </div>
@@ -876,7 +929,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                        
                        <div>
                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiTags}</label>
-                           <input type="text" value={ankiSettings.tags} onChange={(e) => setAnkiSettings({...ankiSettings, tags: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs transition-colors" placeholder="tag1, tag2" />
+                           <input type="text" value={ankiSettings.tags} onChange={(e) => setAnkiSettings({...ankiSettings, tags: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs transition-colors" placeholder={t.tagsPlaceholder} />
                        </div>
                    </div>
                )}

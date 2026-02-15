@@ -1,68 +1,182 @@
+export interface Condition {
+    name: string;
+    isDictionaryForm: boolean;
+    subConditions?: string[];
+    // Add optional i18n property to support internationalization data from Yomitan dictionaries.
+    i18n?: { language: string; name: string; description?: string }[];
+}
 
-import { japaneseTransforms, Rule } from './japaneseDeinflectionRules';
+export interface TransformRule {
+    type: 'suffix' | 'prefix' | 'other';
+    isInflected?: RegExp;
+    deinflected?: string;
+    conditionsIn: string[];
+    conditionsOut: string[];
+    deinflect?: (term: string) => string;
+}
+
+// Add optional i18n property to support internationalization data from Yomitan dictionaries.
+export interface TransformGroup {
+    name: string;
+    description?: string;
+    rules: TransformRule[];
+    i18n?: { language: string; name: string; description?: string }[];
+}
+
+export interface LanguageTransforms {
+    language: string;
+    conditions: Record<string, Condition>;
+    transforms: Record<string, TransformGroup>;
+}
 
 export interface DeinflectionResult {
     term: string;
     rules: string[];
     reasons: string[];
+    tags: string[]; // Captured from conditions
 }
 
-export class Deinflector {
-    private rules: Record<string, Rule[]>;
+// Helper factory functions to match Yomitan file structure
+export const suffixInflection = (suffix: string, deinflected: string, conditionsIn: string[], conditionsOut: string[]): TransformRule => ({
+    type: 'suffix',
+    isInflected: new RegExp(`${suffix}$`),
+    deinflected,
+    conditionsIn,
+    conditionsOut
+});
 
-    constructor() {
-        this.rules = {};
-        // Flatten the rules from the transform object
-        for (const [key, group] of Object.entries(japaneseTransforms.transforms)) {
-            this.rules[key] = group.rules;
+export const prefixInflection = (prefix: string, deinflected: string, conditionsIn: string[], conditionsOut: string[]): TransformRule => ({
+    type: 'prefix',
+    isInflected: new RegExp(`^${prefix}`),
+    deinflected,
+    conditionsIn,
+    conditionsOut
+});
+
+// Mock environment to parse user uploaded JS files
+export const parseTransforms = (fileContent: string): LanguageTransforms | null => {
+    try {
+        // 1. Strip imports and exports to make it executable in function scope
+        let cleanCode = fileContent
+            .replace(/import\s+.*?from\s+['"].*?['"];?/g, '')
+            .replace(/export\s+const\s+(\w+)\s*=/g, 'return { $1: $1 }; \nconst $1 =')
+            .replace(/export\s+default\s+/g, 'return ')
+            .replace(/export\s+\{.*?\};?/g, '');
+
+        // 2. Identify the main variable name if possible, or rely on return
+        // We inject the helper functions into the scope
+        const factory = new Function('suffixInflection', 'prefixInflection', `
+            ${cleanCode}
+        `);
+
+        const result = factory(suffixInflection, prefixInflection);
+        
+        // The result might be an object containing the transforms (e.g. { englishTransforms: {...} }) or the object itself
+        const keys = Object.keys(result);
+        if (keys.length === 1 && result[keys[0]].conditions && result[keys[0]].transforms) {
+            return result[keys[0]] as LanguageTransforms;
+        } else if (result.conditions && result.transforms) {
+            return result as LanguageTransforms;
         }
+        
+        return null;
+    } catch (e) {
+        console.error("Failed to parse transforms:", e);
+        return null;
+    }
+};
+
+export class Deinflector {
+    private transforms: Record<string, LanguageTransforms> = {};
+
+    public load(lang: string, transforms: LanguageTransforms) {
+        this.transforms[lang] = transforms;
     }
 
-    public deinflect(term: string): DeinflectionResult[] {
+    public deinflect(term: string, lang: string): DeinflectionResult[] {
+        const langTransforms = this.transforms[lang];
+        if (!langTransforms) return [{ term, rules: [], reasons: [], tags: [] }];
+
         const results: DeinflectionResult[] = [];
-        this.deinflectRecursive(term, [], [], results);
+        const seen = new Set<string>();
+
+        this.deinflectRecursive(lang, term, [], [], results, seen);
+        
+        if (!seen.has(term)) {
+             results.unshift({ term, rules: [], reasons: [], tags: [] });
+        }
+
         return results;
     }
 
     private deinflectRecursive(
-        term: string, 
-        ruleTrace: string[], 
-        reasonTrace: string[], 
-        results: DeinflectionResult[]
+        lang: string,
+        currentTerm: string,
+        ruleTrace: string[],
+        reasonTrace: string[],
+        results: DeinflectionResult[],
+        seen: Set<string>,
+        previousConditionsIn: string[] = []
     ) {
-        // Base case: add current term as a candidate
-        results.push({
-            term,
-            rules: [...ruleTrace],
-            reasons: [...reasonTrace]
-        });
+        const langTransforms = this.transforms[lang];
+        if (!langTransforms) return;
 
-        // Limit recursion depth to prevent infinite loops or excessive processing
-        if (ruleTrace.length > 5) return;
+        if (!seen.has(currentTerm)) {
+            const tags = this.getTagsForTrace(lang, ruleTrace, previousConditionsIn);
+            results.push({
+                term: currentTerm,
+                rules: [...ruleTrace],
+                reasons: [...reasonTrace],
+                tags
+            });
+            seen.add(currentTerm);
+        }
 
-        for (const [groupName, rules] of Object.entries(this.rules)) {
-            for (const rule of rules) {
-                if (term.endsWith(rule.suffixIn)) {
-                    // Check if the stripped term is valid (simple heuristic: not empty)
-                    if (term.length > rule.suffixIn.length) {
-                        const root = term.substring(0, term.length - rule.suffixIn.length) + rule.suffixOut;
-                        
-                        // Prevent cycles (e.g. A -> B -> A) although rare with length reduction
-                        // Simple optimization: only proceed if length reduces or stays same (some rules might expand, handle carefully)
-                        // Most deinflections reduce length or swap suffixes.
-                        
-                        this.deinflectRecursive(
-                            root, 
-                            [...ruleTrace, groupName], 
-                            [...reasonTrace, groupName], 
-                            results
-                        );
+        if (ruleTrace.length > 4) return;
+
+        for (const [transformName, group] of Object.entries(langTransforms.transforms)) {
+            for (const rule of group.rules) {
+                if (previousConditionsIn.length > 0) {
+                    const compatible = rule.conditionsOut.some(c => previousConditionsIn.includes(c));
+                    if (!compatible) continue;
+                }
+
+                let newTerm: string | null = null;
+                
+                if (rule.deinflect) {
+                    if (rule.isInflected?.test(currentTerm)) {
+                        newTerm = rule.deinflect(currentTerm);
                     }
+                } else if (rule.type === 'suffix' && rule.isInflected) {
+                    if (rule.isInflected.test(currentTerm)) {
+                        newTerm = currentTerm.replace(rule.isInflected, rule.deinflected || '');
+                    }
+                } else if (rule.type === 'prefix' && rule.isInflected) {
+                    if (rule.isInflected.test(currentTerm)) {
+                        newTerm = currentTerm.replace(rule.isInflected, rule.deinflected || '');
+                    }
+                }
+
+                if (newTerm && newTerm !== currentTerm && newTerm.length > 0) {
+                    this.deinflectRecursive(
+                        lang,
+                        newTerm,
+                        [...ruleTrace, transformName],
+                        [...reasonTrace, group.description || transformName],
+                        results,
+                        seen,
+                        rule.conditionsIn
+                    );
                 }
             }
         }
     }
+
+    private getTagsForTrace(lang: string, ruleTrace: string[], currentConditions: string[]): string[] {
+        const langTransforms = this.transforms[lang];
+        if (!langTransforms) return [];
+        return currentConditions.map(c => langTransforms.conditions[c]?.name || c);
+    }
 }
 
-const instance = new Deinflector();
-export const deinflect = (term: string) => instance.deinflect(term);
+export const deinflector = new Deinflector();

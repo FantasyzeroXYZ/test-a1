@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, memo, useMemo, useCallback } from 'react';
 import { SubtitleLine, Language, GameType, SegmentationMode, SubtitleMode } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -15,15 +14,17 @@ interface SubtitleRendererProps {
   learningLanguage: string;
   fontSize: number;
   onWordClick: (word: string, line: SubtitleLine, index: number) => void;
-  onTextHover?: (event: React.MouseEvent, text: string, line: SubtitleLine, index: number) => void; // For Yomitan Mode Hover
-  onTextClick?: (event: React.MouseEvent, text: string, line: SubtitleLine, index: number) => void; // For Yomitan Mode Click (Pin)
+  onTextHover?: (event: React.MouseEvent, text: string, line: SubtitleLine, index: number) => void; 
+  onTextClick?: (event: React.MouseEvent, text: string, line: SubtitleLine, index: number) => void; 
   segmentationMode: SegmentationMode;
   onAutoSegment: () => void;
   isScanning: boolean;
   onShiftTimeline: (seconds: number) => void;
   subtitleMode: SubtitleMode;
-  yomitanMode: boolean; // Prop to enable character-based rendering
-  yomitanHighlight?: { lineId: string; start: number; length: number; pinned?: boolean }; // Added pinned prop
+  yomitanMode: boolean; 
+  yomitanHighlight?: { lineId: string; start: number; length: number; pinned?: boolean }; 
+  showSubtitles?: boolean;
+  onTranslateClick?: (event: React.MouseEvent, line: SubtitleLine) => void;
 }
 
 const LARGE_DATASET_THRESHOLD = 100;
@@ -44,15 +45,16 @@ const SubtitleItem = memo(({
   onTextClick, 
   segmentationMode,
   yomitanMode,
-  yomitanHighlight
+  yomitanHighlight,
+  onTranslateClick,
+  showSubtitles = true
 }: any) => {
   const segments = useMemo(() => {
     if (!line.text.trim()) return [];
-    // If Yomitan mode is enabled, we treat every character as a "segment" for precise clicking/hovering
     if (yomitanMode) {
-        return Array.from(line.text); // Unicode safe split
+        return Array.from(line.text as string); 
     }
-    return segmentText(line.text, learningLanguage, segmentationMode);
+    return segmentText(line.text as string, learningLanguage as string, segmentationMode as SegmentationMode);
   }, [line.text, learningLanguage, segmentationMode, yomitanMode]);
 
   const renderContent = () => {
@@ -67,7 +69,6 @@ const SubtitleItem = memo(({
 
     let wordIndexCounter = 0;
     return segments.map((seg: string, idx: number) => {
-      // In Yomitan mode, we don't do word checks or spacing logic in the same way
       const isWordSegment = yomitanMode ? true : isWord(seg); 
       const currentWordIndex = isWordSegment ? wordIndexCounter++ : -1;
       const isHidden = gameType === 'cloze' && isActive && gameTargetLineId === line.id && gameHiddenWordIndex === currentWordIndex;
@@ -79,59 +80,38 @@ const SubtitleItem = memo(({
       let spacing = '';
       if (!yomitanMode && segmentationMode !== 'none' && !isNonSpacedLang(learningLanguage)) {
         const prevSeg = segments[idx - 1];
-        if (prevSeg && isWord(prevSeg) && isWordSegment) {
-          spacing = 'mr-1';
-        }
+        if (prevSeg && isWord(prevSeg) && isWordSegment) spacing = 'mr-1';
       }
 
-      // Check for Yomitan Highlight - Using unicode character index logic
       const isHighlighted = yomitanMode && yomitanHighlight && yomitanHighlight.lineId === line.id && idx >= yomitanHighlight.start && idx < yomitanHighlight.start + yomitanHighlight.length;
       const isPinned = isHighlighted && yomitanHighlight.pinned;
 
-      // Class Logic:
-      // 1. Base cursor
-      // 2. Hover underline ONLY if NOT in yomitan mode
-      // 3. Highlight background if matched 
-      // 4. Color logic
+      let classes = `cursor-pointer transition-colors ${spacing} rounded-sm `;
       
-      let classes = `cursor-pointer transition-colors ${spacing} `;
-      
-      if (!yomitanMode) {
-          classes += 'hover:underline hover:text-indigo-500 dark:hover:text-indigo-400 active:text-indigo-400 dark:active:text-indigo-300 ';
-      }
-
-      if (isHighlighted) {
-          // Visual difference: Pinned (Clicked) is darker/stronger than Hover
+      if (!showSubtitles) {
+          classes += 'text-transparent bg-slate-200 dark:bg-slate-700/50 select-none ';
+      } else if (isHighlighted) {
           if (isPinned) {
-              classes += 'bg-indigo-600 text-white rounded-sm shadow-sm ';
+              classes += 'bg-indigo-300 dark:bg-indigo-600 text-slate-900 dark:text-white ';
           } else {
-              classes += 'bg-indigo-400 text-white rounded-sm ';
+              classes += 'bg-indigo-100 dark:bg-indigo-500/30 ';
           }
       } else {
-          // Normal text color logic
-          if (!isWordSegment && !yomitanMode) {
-              classes += 'text-slate-400 dark:text-slate-500 ';
-          }
-          // In yomitan mode, subtle hover effect on characters
-          if (yomitanMode) {
-             classes += 'hover:bg-indigo-100 dark:hover:bg-indigo-900/30 '; 
-          }
+          if (!isWordSegment && !yomitanMode) classes += 'text-slate-400 dark:text-slate-500 ';
+          classes += 'hover:bg-black/5 dark:hover:bg-white/10 ';
       }
 
       return (
         <span 
           key={idx} 
           onMouseEnter={(e) => {
-              if (yomitanMode && onTextHover) {
-                  onTextHover(e, seg, line, idx);
-              }
+              if (showSubtitles && yomitanMode && onTextHover) onTextHover(e, seg, line, idx);
           }}
           onClick={(e) => { 
               e.stopPropagation(); 
-              if (yomitanMode && onTextClick) {
-                  onTextClick(e, seg, line, idx);
-              } else if (!yomitanMode) {
-                  onWordClick(seg, line, idx); 
+              if (showSubtitles) {
+                  if (yomitanMode && onTextClick) onTextClick(e, seg, line, idx);
+                  else if (!yomitanMode) onWordClick(seg, line, idx); 
               }
           }} 
           className={classes}
@@ -145,105 +125,66 @@ const SubtitleItem = memo(({
   return (
     <div 
       onClick={() => onSeek(line.start)}
-      className={`relative py-1 md:py-1.5 px-6 rounded-2xl text-center cursor-pointer transition-all duration-300 ${
+      className={`group relative flex items-center justify-center py-1 md:py-1.5 px-6 rounded-2xl text-center cursor-pointer transition-all duration-300 ${
         isActive 
           ? 'bg-white dark:bg-slate-800/60 text-slate-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 shadow-xl scale-100 opacity-100' 
           : 'text-slate-400 dark:text-slate-500 opacity-40 scale-95 hover:opacity-80'
       }`} 
       style={{ fontSize: isActive ? `${fontSize}px` : `${Math.max(12, fontSize * 0.85)}px`, willChange: 'transform, opacity' }}
     >
-      <div className="inline-block leading-relaxed tracking-wide w-full overflow-hidden break-words">{renderContent()}</div>
+        <div className="inline-block leading-relaxed tracking-wide w-full overflow-hidden break-words flex-1 min-w-0">{renderContent()}</div>
+        {isActive && yomitanMode && onTranslateClick && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onTranslateClick(e, line); }}
+              className="ml-2 p-2 text-slate-400 hover:text-indigo-500 shrink-0"
+              title={t.sentenceTranslation}
+            >
+              <i className="fa-solid fa-language text-sm"></i>
+            </button>
+        )}
     </div>
   );
 }, (prev, next) => {
-  // Optimization: Custom comparison to prevent re-render of unrelated lines during hover highlighting
-  const basicPropsEqual = (
+  return (
       prev.isActive === next.isActive && 
       prev.line.id === next.line.id && 
-      prev.gameType === next.gameType && 
       prev.fontSize === next.fontSize &&
-      prev.segmentationMode === next.segmentationMode && 
-      prev.line.text === next.line.text &&
-      prev.yomitanMode === next.yomitanMode
-  );
-
-  if (!basicPropsEqual) return false;
-
-  // Check highlight equality
-  if (prev.yomitanHighlight === next.yomitanHighlight) return true;
-
-  // If highlight object changed, check if it affects *this* line
-  const prevH = prev.yomitanHighlight;
-  const nextH = next.yomitanHighlight;
-  const lineId = prev.line.id;
-
-  const prevAffected = prevH && prevH.lineId === lineId;
-  const nextAffected = nextH && nextH.lineId === lineId;
-
-  // If neither previous nor next highlight affects this line, it's equal (no re-render)
-  if (!prevAffected && !nextAffected) return true;
-
-  // If one affects and other doesn't, or both affect but differ => re-render
-  if (prevAffected !== nextAffected) return false;
-  
-  // Both affect this line, check details including pinned status
-  return (
-      prevH.start === nextH.start && 
-      prevH.length === nextH.length && 
-      prevH.pinned === nextH.pinned
+      prev.yomitanMode === next.yomitanMode &&
+      prev.yomitanHighlight === next.yomitanHighlight
   );
 });
 
 export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({ 
-  subtitles, activeSubtitleIndex, onSeek, gameType, language, learningLanguage, fontSize, onWordClick, onTextHover, onTextClick, segmentationMode, onAutoSegment, isScanning, onShiftTimeline, subtitleMode, yomitanMode, yomitanHighlight
+  subtitles, activeSubtitleIndex, onSeek, gameType, language, learningLanguage, fontSize, onWordClick, onTextHover, onTextClick, onTranslateClick, segmentationMode, onAutoSegment, isScanning, onShiftTimeline, subtitleMode, yomitanMode, yomitanHighlight, showSubtitles = true
 }) => {
   const t = getTranslation(language);
   const containerRef = useRef<HTMLDivElement>(null);
-
   const isLargeDataset = subtitles.length >= LARGE_DATASET_THRESHOLD;
 
   useEffect(() => {
     if (activeSubtitleIndex === -1) return;
-
     const targetContainer = containerRef.current;
     if (!targetContainer) return;
-
     let targetElement: HTMLElement | null = null;
-    
-    if (subtitleMode === 'single') {
-        targetElement = targetContainer.firstElementChild as HTMLElement;
-    } else if (isLargeDataset) {
+    if (subtitleMode === 'single') targetElement = targetContainer.firstElementChild as HTMLElement;
+    else if (isLargeDataset) {
         const startIndex = Math.max(0, activeSubtitleIndex - SLICE_RANGE);
         const relativeIndex = activeSubtitleIndex - startIndex;
         targetElement = targetContainer.children[relativeIndex] as HTMLElement;
     } else {
         targetElement = targetContainer.children[activeSubtitleIndex] as HTMLElement;
     }
-    
     if (targetElement) {
         const containerRect = targetContainer.getBoundingClientRect();
         const elementRect = targetElement.getBoundingClientRect();
-        
-        const isCentered = (elementRect.top > containerRect.top + containerRect.height * 0.3) &&
-                           (elementRect.bottom < containerRect.bottom - containerRect.height * 0.3);
-
-        if (!isCentered) {
-            requestAnimationFrame(() => {
-                targetElement!.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            });
-        }
+        const isCentered = (elementRect.top > containerRect.top + containerRect.height * 0.3) && (elementRect.bottom < containerRect.bottom - containerRect.height * 0.3);
+        if (!isCentered) requestAnimationFrame(() => targetElement!.scrollIntoView({ behavior: 'smooth', block: 'center' }));
     }
   }, [activeSubtitleIndex, isLargeDataset, subtitleMode]);
 
   const visibleLines = useMemo(() => {
-    if (subtitleMode === 'single') {
-      return activeSubtitleIndex !== -1 ? [subtitles[activeSubtitleIndex]] : [];
-    }
-
-    if (!isLargeDataset) {
-      return subtitles;
-    }
-    
+    if (subtitleMode === 'single') return activeSubtitleIndex !== -1 ? [subtitles[activeSubtitleIndex]] : [];
+    if (!isLargeDataset) return subtitles;
     const start = Math.max(0, activeSubtitleIndex - SLICE_RANGE);
     const end = Math.min(subtitles.length, activeSubtitleIndex + SLICE_RANGE + 1);
     return subtitles.slice(start, end);
@@ -280,9 +221,11 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
             onWordClick={onWordClick}
             onTextHover={onTextHover}
             onTextClick={onTextClick}
+            onTranslateClick={onTranslateClick}
             segmentationMode={segmentationMode}
             yomitanMode={yomitanMode}
             yomitanHighlight={yomitanHighlight}
+            showSubtitles={showSubtitles}
           />
         ))}
         <div className="h-64 shrink-0" />
