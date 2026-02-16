@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, memo, useMemo, useCallback } from 'react';
 import { DictionaryResponse, LearningLanguage, Language, SubtitleLine, SegmentationMode, WebSearchEngine, AnkiSettings, AudioTrack, ReaderSettings, TableEntry } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -263,8 +264,8 @@ const DictionaryModal: React.FC<Props> = ({
           case 'baidu_baike': return `https://baike.baidu.com/item/${encodedTerm}`;
           case 'bing': return `https://www.bing.com/search?q=${encodedTerm}`;
           case 'bing_trans': return `https://www.bing.com/translator/?text=${encodedTerm}&to=${targetLang}`;
-          case 'deepl': return `https://www.deepl.com/translator#auto/${targetLang === 'zh-Hans' ? 'zh' : 'en'}/${encodedTerm}`;
-          case 'youdao_trans': return `https://dict.youdao.com/search?q=${encodedTerm}`;
+          case 'baidu_trans': return `https://fanyi.baidu.com/#en/zh/${encodedTerm}`;
+          case 'sogou_trans': return `https://fanyi.sogou.com/text?keyword=${encodedTerm}`;
           case 'wikipedia': return `https://wikipedia.org/wiki/${encodedTerm}`;
           case 'moegirl': return `https://zh.moegirl.org.cn/${encodedTerm}`;
           default: return `https://www.google.com/search?q=${encodedTerm}`;
@@ -387,7 +388,7 @@ const DictionaryModal: React.FC<Props> = ({
               let defContent = s.definition;
               // Check if definition is a JSON string of structured content
               try {
-                  if (typeof defContent === 'string' && defContent.trim().startsWith('{') && defContent.includes('"type":"structured-content"')) {
+                  if (typeof defContent === 'string' && defContent.trim().startsWith('{"type":"structured-content"')) {
                       const parsed = JSON.parse(defContent);
                       // Convert structured content object to plain text
                       defContent = formatContentPlain(parsed);
@@ -433,7 +434,7 @@ const DictionaryModal: React.FC<Props> = ({
         definition = contentOverride;
         // Check if override itself is structured JSON
         try {
-            if (definition.trim().startsWith('{') && definition.includes('"type":"structured-content"')) {
+            if (definition.trim().startsWith('{"type":"structured-content"')) {
                 const parsed = JSON.parse(definition);
                 definition = formatContentPlain(parsed);
             }
@@ -573,7 +574,11 @@ const DictionaryModal: React.FC<Props> = ({
               return <><option value="wikipedia">Wikipedia</option><option value="baidu_baike">Baidu Baike</option><option value="moegirl">Moegirl</option></>;
           case 'translate':
           default:
-              return <><option value="bing_trans">Bing Translator</option><option value="deepl">DeepL</option><option value="youdao_trans">Youdao</option></>;
+              return (
+                  <>
+                    <option value="bing_trans">Bing Translator</option><option value="baidu_trans">Baidu</option><option value="sogou_trans">Sogou</option>
+                  </>
+              );
       }
   };
 

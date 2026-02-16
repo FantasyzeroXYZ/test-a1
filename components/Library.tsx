@@ -15,6 +15,7 @@ interface LibraryProps {
   onImportLink: (url: string, category: 'music' | 'audiobook') => void;
   onImportSubtitle: (trackId: string, file: File, isSecondary: boolean) => void;
   language: Language;
+  isImporting?: boolean; // New prop for loading state
 }
 
 export const Library: React.FC<LibraryProps> = ({
@@ -27,7 +28,8 @@ export const Library: React.FC<LibraryProps> = ({
   onUpdateTrackUrl,
   onImportLink,
   onImportSubtitle,
-  language
+  language,
+  isImporting
 }) => {
   const [activeTab, setActiveTab] = useState<'music' | 'audiobook'>('audiobook');
   const [viewType, setViewType] = useState<'grid' | 'list'>('grid');
@@ -42,22 +44,15 @@ export const Library: React.FC<LibraryProps> = ({
   const t = getTranslation(language);
   const filteredTracks = tracks.filter(t => t.category === activeTab);
 
-  // Track initial load state to prevent modal from opening on refresh/data load
-  const isInitialLoad = useRef(true);
   const prevTracksLen = useRef(tracks.length);
 
   useEffect(() => {
-      // If we have tracks, it's either an initial load or an update
-      if (tracks.length > 0) {
-          if (isInitialLoad.current) {
-              // This is the first time we see data (e.g. from DB load), do not open modal
-              isInitialLoad.current = false;
-          } else if (tracks.length > prevTracksLen.current) {
-              // Real user addition: track length increased after initial load
-              const newTrack = tracks[tracks.length - 1];
-              if (newTrack.file) {
-                  setEditingTrack(newTrack);
-              }
+      // If track count increases, it means a new track was added. Open edit modal for it.
+      if (tracks.length > prevTracksLen.current) {
+          const newTrack = tracks[tracks.length - 1];
+          // Only open if it's a file import (optional, but good UX)
+          if (newTrack.file) {
+              setEditingTrack(newTrack);
           }
       }
       prevTracksLen.current = tracks.length;
@@ -149,10 +144,7 @@ export const Library: React.FC<LibraryProps> = ({
     }
   };
 
-  // Improved Import Handler for iOS compatibility
   const handleImportWrapper = (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => {
-      // iOS sometimes returns empty type or generic type for audio files
-      // We rely on extension checking if type fails
       const file = e.target.files?.[0];
       if (file) {
           onImport(e, category);
@@ -168,7 +160,16 @@ export const Library: React.FC<LibraryProps> = ({
   );
 
   return (
-    <div className="w-full h-full mx-auto p-4 md:p-6 animate-fade-in pb-32 overflow-y-auto no-scrollbar transition-colors duration-300">
+    <div className="w-full h-full mx-auto p-4 md:p-6 animate-fade-in pb-32 overflow-y-auto no-scrollbar transition-colors duration-300 relative">
+      
+      {/* Loading Overlay */}
+      {isImporting && (
+          <div className="absolute inset-0 z-[200] bg-white/50 dark:bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center">
+              <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+              <p className="text-indigo-600 dark:text-indigo-300 font-bold animate-pulse">Importing...</p>
+          </div>
+      )}
+
       {/* Top Navigation */}
       <div className="flex items-center justify-between mb-8">
          <div className="flex bg-white/80 dark:bg-slate-800/80 p-1.5 rounded-xl border border-gray-200 dark:border-slate-700/50 backdrop-blur-md transition-colors">
@@ -342,15 +343,23 @@ export const Library: React.FC<LibraryProps> = ({
       {/* Edit Item Modal */}
       {editingTrack && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xl p-4 transition-all animate-fade-in">
-           <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700/50 p-6 rounded-3xl shadow-2xl max-w-sm w-full animate-bounce-in max-h-[90vh] overflow-y-auto no-scrollbar transition-colors">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-600/20 flex items-center justify-center text-amber-500 dark:text-amber-400">
-                  <i className="fa-solid fa-pencil"></i>
-                </div>
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.editTrackInfo}</h3>
+           <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700/50 rounded-3xl shadow-2xl max-w-sm w-full animate-bounce-in max-h-[90vh] flex flex-col transition-colors overflow-hidden relative">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 pb-2 shrink-0 bg-white dark:bg-slate-900 z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-600/20 flex items-center justify-center text-amber-500 dark:text-amber-400">
+                      <i className="fa-solid fa-pencil"></i>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.editTrackInfo}</h3>
+                  </div>
+                  <button onClick={() => setEditingTrack(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-2">
+                      <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
               </div>
               
-              <div className="space-y-6">
+              {/* Content (Scrollable) */}
+              <div className="flex-1 overflow-y-auto no-scrollbar p-6 pt-2 space-y-6">
                 <div>
                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">{t.coverImage}</label>
                    <div className="flex gap-4 items-start">
@@ -450,7 +459,8 @@ export const Library: React.FC<LibraryProps> = ({
                 </div>
               </div>
 
-              <div className="flex gap-3 mt-8">
+              {/* Footer (Fixed) */}
+              <div className="p-6 pt-4 border-t border-gray-200 dark:border-slate-700 shrink-0 bg-white dark:bg-slate-900 flex gap-3">
                 <button onClick={() => setEditingTrack(null)} className="flex-1 py-4 text-sm font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 transition-colors">{t.cancel}</button>
                 <button onClick={saveTrackEdit} className="flex-1 py-4 bg-amber-600 rounded-2xl text-sm font-black text-white shadow-xl shadow-amber-600/30 hover:bg-amber-500 transition-all active:scale-95">{t.save}</button>
               </div>

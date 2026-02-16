@@ -124,7 +124,13 @@ const SubtitleItem = memo(({
 
   return (
     <div 
-      onClick={() => onSeek(line.start)}
+      onClick={() => {
+          // If active AND in yomitan mode, clicking the background (non-word) should NOT seek.
+          // Only seeking via previous/next buttons or specific UI actions allowed.
+          // Clicking NON-active lines is fine to seek.
+          if (isActive && yomitanMode) return;
+          onSeek(line.start);
+      }}
       className={`group relative flex items-center justify-center py-1 md:py-1.5 px-6 rounded-2xl text-center cursor-pointer transition-all duration-300 ${
         isActive 
           ? 'bg-white dark:bg-slate-800/60 text-slate-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 shadow-xl scale-100 opacity-100' 

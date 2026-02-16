@@ -101,7 +101,8 @@ export type SegmentationMode = 'browser' | 'mecab' | 'none';
 export type GameType = 'none' | 'cloze' | 'dictation';
 export type PlaybackMode = 'normal' | 'pause-per-sentence';
 
-export type WebSearchEngine = 'google' | 'baidu' | 'baidu_baike' | 'bing' | 'bing_trans' | 'deepl' | 'youdao_trans' | 'wikipedia' | 'moegirl';
+// Updated Search Engines
+export type WebSearchEngine = 'google' | 'baidu' | 'baidu_baike' | 'bing' | 'bing_trans' | 'baidu_trans' | 'sogou_trans' | 'wikipedia' | 'moegirl';
 export type WebLinkMode = 'inline' | 'external';
 
 export type InputSource = 'keyboard' | 'gamepad';

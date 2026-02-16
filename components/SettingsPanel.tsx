@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, SubtitleMode, SceneKeybindings, GameType, LearningLanguage, AnkiSettings, SegmentationMode, PlaybackMode, WebSearchEngine, ReaderSettings, Theme, InputSource, YomitanModeType } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -45,6 +46,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [isImportingDict, setIsImportingDict] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const [dictionaries, setDictionaries] = useState<DictionaryMeta[]>([]);
+  const [importAbortController, setImportAbortController] = useState<AbortController | null>(null);
   
   // Anki Fetch State
   const [ankiDecks, setAnkiDecks] = useState<string[]>([]);
@@ -201,6 +203,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       }
   };
 
+  const cancelImport = () => {
+      if (importAbortController) {
+          importAbortController.abort();
+      }
+  };
+
   const handleYomitanImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -210,6 +218,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         return;
     }
 
+    const controller = new AbortController();
+    setImportAbortController(controller);
     setIsImportingDict(true);
     setImportProgress("Reading file...");
 
@@ -237,16 +247,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             alert(t.dictFileNotFound.replace('{filePattern}', filePattern));
             setIsImportingDict(false);
             setImportProgress('');
+            setImportAbortController(null);
             return;
         }
 
         for (let i = 0; i < files.length; i++) {
+            if (controller.signal.aborted) throw new Error("Import Aborted");
+
             setImportProgress(`Parsing bank ${i + 1}/${files.length}...`);
             const fileName = files[i];
             const content = await zip.file(fileName).async('string');
             const data = JSON.parse(content);
             
             for (const item of data) {
+                if (controller.signal.aborted) throw new Error("Import Aborted");
                 if (!Array.isArray(item)) continue;
                 
                 if (dictImportType === 'definition') {
@@ -322,12 +336,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         alert(t.dictImportSuccess.replace('{title}', dictTitle).replace('{type}', typeStr).replace('{count}', String(totalCount)));
         await refreshDictionaries();
 
-    } catch (err) {
-        console.error(err);
-        alert(t.dictImportFailed.replace('{error}', String(err)));
+    } catch (err: any) {
+        if (err.message === "Import Aborted") {
+            alert("Import cancelled by user.");
+        } else {
+            console.error(err);
+            alert(t.dictImportFailed.replace('{error}', String(err)));
+        }
     } finally {
         setIsImportingDict(false);
         setImportProgress('');
+        setImportAbortController(null);
         e.target.value = '';
     }
   };
@@ -412,7 +431,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               return <><option value="wikipedia">Wikipedia</option><option value="baidu_baike">Baidu Baike</option><option value="moegirl">Moegirl</option></>;
           case 'translate':
           default:
-              return <><option value="bing_trans">Bing Translator</option><option value="deepl">DeepL</option><option value="youdao_trans">Youdao</option></>;
+              return <><option value="bing_trans">Bing Translator</option><option value="baidu_trans">Baidu</option><option value="sogou_trans">Sogou</option></>;
       }
   };
 
@@ -569,6 +588,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
           {openSections.has('dictionaries') && (
             <div className="p-4 bg-white dark:bg-slate-800/30 transition-colors space-y-4">
+               {/* Export Mode Toggle */}
+               <div className="border-b border-gray-200 dark:border-slate-700 pb-4">
+                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Card Export Mode</label>
+                   <div className="flex bg-gray-100 dark:bg-slate-900 rounded p-1 border border-gray-200 dark:border-slate-700">
+                       <button 
+                           onClick={() => setReaderSettings({...readerSettings, dictExportMode: 'anki'})} 
+                           className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.dictExportMode === 'anki' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+                       >
+                           Anki
+                       </button>
+                       <button 
+                           onClick={() => setReaderSettings({...readerSettings, dictExportMode: 'table'})} 
+                           className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.dictExportMode === 'table' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500'}`}
+                       >
+                           Table
+                       </button>
+                   </div>
+               </div>
+
                {/* Import Section */}
                <div className="border-b border-gray-200 dark:border-slate-700 pb-4">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.importYomitan}</label>
@@ -594,10 +632,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         </select>
                       </div>
                       <input type="file" accept=".zip" onChange={handleYomitanImport} disabled={isImportingDict} className="text-xs text-slate-500 dark:text-slate-400" />
-                      {isImportingDict && <p className="text-xs text-indigo-500 animate-pulse">{importProgress}</p>}
+                      {isImportingDict && (
+                          <div className="flex items-center gap-2">
+                              <p className="text-xs text-indigo-500 animate-pulse flex-1">{importProgress}</p>
+                              <button onClick={cancelImport} className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] rounded hover:bg-red-200 font-bold">Stop</button>
+                          </div>
+                      )}
                   </div>
                </div>
                
+               {/* ... rest of the file ... */}
                <div className="flex flex-col gap-2 pb-2 border-b border-gray-200 dark:border-slate-700">
                     <div className="flex items-center justify-between">
                         <div className="flex flex-col">

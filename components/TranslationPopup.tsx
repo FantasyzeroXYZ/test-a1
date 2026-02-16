@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, WebSearchEngine } from '../types';
 
@@ -19,14 +20,13 @@ const constructWebSearchUrl = (engine: WebSearchEngine, term: string, targetLang
     const encodedTerm = encodeURIComponent(term);
     switch (engine) {
         case 'bing_trans': return `https://www.bing.com/translator/?text=${encodedTerm}&to=${targetLang}`;
-        case 'deepl': return `https://www.deepl.com/translator#auto/${targetLang === 'zh-Hans' ? 'zh' : 'en'}/${encodedTerm}`;
-        case 'youdao_trans': return `https://dict.youdao.com/search?q=${encodedTerm}`;
-        case 'google': // Fallback to google translate
-        default: return `https://translate.google.com/?sl=auto&tl=${targetLang}&text=${encodedTerm}&op=translate`;
+        case 'baidu_trans': return `https://fanyi.baidu.com/#en/zh/${encodedTerm}`;
+        case 'sogou_trans': return `https://fanyi.sogou.com/text?keyword=${encodedTerm}`;
+        default: return `https://www.bing.com/translator/?text=${encodedTerm}&to=${targetLang}`;
     }
 };
 
-const translationEngines: WebSearchEngine[] = ['bing_trans', 'deepl', 'youdao_trans'];
+const translationEngines: WebSearchEngine[] = ['bing_trans', 'baidu_trans', 'sogou_trans'];
 
 export const TranslationPopup: React.FC<TranslationPopupProps> = ({ 
     position, sentence, onClose, t, initialEngine, language
@@ -47,14 +47,17 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
 
   const style: React.CSSProperties = {
     position: 'fixed',
-    left: Math.min(window.innerWidth - 420, Math.max(10, position.x - 210)), 
-    top: Math.min(window.innerHeight - 350, position.y + 25), 
+    left: '50%',
+    transform: 'translateX(-50%)',
+    top: `${Math.min(window.innerHeight - 310, position.y + 25)}px`,
     height: '300px',
-    zIndex: 1000, 
+    zIndex: 1000,
+    width: 'calc(100vw - 20px)',
+    maxWidth: '400px',
   };
   
   return (
-    <div ref={ref} style={style} className="w-[400px] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col overflow-hidden animate-fade-in text-sm font-sans">
+    <div ref={ref} style={style} className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col overflow-hidden animate-fade-in text-sm font-sans">
         <div className="p-2 border-b dark:border-slate-800 bg-slate-50 dark:bg-slate-900/30 flex items-center justify-between">
             <div className="flex items-center gap-2">
                 <i className="fa-solid fa-language text-indigo-500 ml-1"></i>
@@ -65,8 +68,8 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
                     className="ml-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded text-[10px] p-1 outline-none text-slate-800 dark:text-white"
                 >
                     <option value="bing_trans">Bing</option>
-                    <option value="deepl">DeepL</option>
-                    <option value="youdao_trans">Youdao</option>
+                    <option value="baidu_trans">Baidu</option>
+                    <option value="sogou_trans">Sogou</option>
                 </select>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><i className="fa-solid fa-times text-xs"></i></button>

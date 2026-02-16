@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useMemo, useState } from 'react';
-import { DictionaryResult, DictionaryEntry } from '../types';
+import { DictionaryResult, DictionaryEntry, LearningLanguage } from '../types';
 
 export interface YomitanAnalysisResult {
     segment: string;
@@ -22,6 +22,8 @@ interface YomitanPopupProps {
   onAddCard: (result: DictionaryResult, entry?: DictionaryEntry) => void;
   onAddAllCardsInTab: (results: DictionaryResult[]) => void;
   t: { [key: string]: string };
+  learningLanguage: LearningLanguage;
+  ttsSettings: { enabled: boolean; rate: number; pitch: number; volume: number; voice: string };
 }
 
 const WordDefinition: React.FC<{ 
@@ -59,7 +61,7 @@ const WordDefinition: React.FC<{
 };
 
 export const YomitanPopup: React.FC<YomitanPopupProps> = ({ 
-    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t
+    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t, learningLanguage, ttsSettings
 }) => {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -80,6 +82,29 @@ export const YomitanPopup: React.FC<YomitanPopupProps> = ({
   };
   
   const activeResult = results[activeSegmentIndex];
+
+  const handlePlayAudio = (wordMatch: YomitanAnalysisResult['foundWords'][0]) => {
+      if (!ttsSettings.enabled) return;
+      
+      let textToSpeak = wordMatch.result.word;
+      const reading = wordMatch.result.entries?.[0]?.pronunciations?.[0]?.text;
+
+      if (learningLanguage === 'ja' && reading && reading !== textToSpeak) {
+          textToSpeak = reading;
+      }
+      
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      utterance.lang = learningLanguage;
+      utterance.rate = ttsSettings.rate;
+      utterance.pitch = ttsSettings.pitch;
+      utterance.volume = ttsSettings.volume;
+      if (ttsSettings.voice) {
+          const voices = window.speechSynthesis.getVoices();
+          const voice = voices.find(v => v.name === ttsSettings.voice);
+          if (voice) utterance.voice = voice;
+      }
+      window.speechSynthesis.speak(utterance);
+  };
 
   return (
     <div ref={ref} style={style} className="w-[320px] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col overflow-hidden animate-fade-in text-sm font-sans">
@@ -107,6 +132,9 @@ export const YomitanPopup: React.FC<YomitanPopupProps> = ({
                                 <div className="flex items-baseline flex-wrap gap-x-2">
                                     <h4 className="font-bold text-base text-slate-800 dark:text-white flex items-center gap-2">
                                         <span>{wordMatch.result.word}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); handlePlayAudio(wordMatch); }} className="text-slate-400 hover:text-indigo-500 text-xs transition-colors">
+                                            <i className="fa-solid fa-volume-high"></i>
+                                        </button>
                                         <button onClick={(e) => { e.stopPropagation(); onAddCard(wordMatch.result); }} className="text-slate-300 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 text-xs transition-colors">
                                             <i className="fa-solid fa-plus-circle"></i>
                                         </button>
