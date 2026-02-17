@@ -1,3 +1,4 @@
+
 /*
  * Copyright (C) 2024-2025  Yomitan Authors
  *
@@ -74,7 +75,7 @@ const phrasalVerbInterposedObjectRule: TransformRule = {
     type: 'other',
     isInflected: new RegExp(`^\\w* (?:(?!\\b(${phrasalVerbWordDisjunction})\\b).)+ (?:${particlesDisjunction})`),
     deinflect: (term) => {
-        return term.replace(new RegExp(`(?<=\\w) (?:(?!\\b(${phrasalVerbWordDisjunction})\\b).)+ (?=(?:${particlesDisjunction}))`), ' ');
+        return term.replace(new RegExp(`(?<=.\\w) (?:(?!\\b(${phrasalVerbWordDisjunction})\\b).)+ (?=(?:${particlesDisjunction}))`), ' ');
     },
     conditionsIn: [],
     conditionsOut: ['v_phr'],

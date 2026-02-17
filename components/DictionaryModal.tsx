@@ -134,7 +134,17 @@ const DictionaryModal: React.FC<Props> = ({
   const [apiLoading, setApiLoading] = useState(false);
   const [localLoading, setLocalLoading] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'dict' | 'script' | 'web' | 'custom'>('dict');
+  const [activeTab, setActiveTab] = useState<'dict' | 'script' | 'web' | 'custom'>(() => {
+    const savedTab = localStorage.getItem('lf_dict_last_tab');
+    if (savedTab === 'dict' || savedTab === 'script' || savedTab === 'web' || savedTab === 'custom') {
+        return savedTab;
+    }
+    return 'dict';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('lf_dict_last_tab', activeTab);
+  }, [activeTab]);
   
   // Persist Dict Source
   const [dictSource, setDictSource] = useState<'api' | 'local'>(() => {
@@ -154,8 +164,11 @@ const DictionaryModal: React.FC<Props> = ({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const segments = useMemo(() => {
+    if (settings.dictMode === 'sentence') {
+        return [sentence];
+    }
     return segmentText(sentence, effectiveLearningLang, segmentationMode);
-  }, [sentence, effectiveLearningLang, segmentationMode]);
+  }, [sentence, effectiveLearningLang, segmentationMode, settings.dictMode]);
 
   // Persist source choice
   useEffect(() => {
@@ -189,12 +202,12 @@ const DictionaryModal: React.FC<Props> = ({
       }
       
       if (settings.dictMode === 'sentence') {
-          setHighlightRange({start: 0, end: segments.length - 1});
+          setHighlightRange({start: 0, end: 0});
       } else {
           setHighlightRange({start: initialSegmentIndex, end: initialSegmentIndex});
       }
     }
-  }, [isOpen, initialWord, initialSegmentIndex, defaultWebEngine]); // Rely on initialWord change to reset
+  }, [isOpen, initialWord, initialSegmentIndex, sentence, settings.dictMode, dictSource]);
 
   const fetchDefinition = async (term: string, source: 'api' | 'local') => {
     if (!term) return;
@@ -279,7 +292,7 @@ const DictionaryModal: React.FC<Props> = ({
         const newHistory = webHistory.slice(0, webHistoryIndex + 1);
         newHistory.push(url);
         setWebHistory(newHistory);
-        setWebHistoryIndex(newHistory.length);
+        setWebHistoryIndex(newHistory.length - 1);
       }
   };
 
@@ -388,10 +401,12 @@ const DictionaryModal: React.FC<Props> = ({
               let defContent = s.definition;
               // Check if definition is a JSON string of structured content
               try {
-                  if (typeof defContent === 'string' && defContent.trim().startsWith('{"type":"structured-content"')) {
+                  if (typeof defContent === 'string' && defContent.trim().startsWith('{')) {
                       const parsed = JSON.parse(defContent);
-                      // Convert structured content object to plain text
-                      defContent = formatContentPlain(parsed);
+                      if (parsed.type === 'structured-content') {
+                         // Convert structured content object to plain text
+                         defContent = formatContentPlain(parsed);
+                      }
                   }
               } catch (e) {
                   // Fallback
@@ -434,9 +449,11 @@ const DictionaryModal: React.FC<Props> = ({
         definition = contentOverride;
         // Check if override itself is structured JSON
         try {
-            if (definition.trim().startsWith('{"type":"structured-content"')) {
+            if (definition.trim().startsWith('{')) {
                 const parsed = JSON.parse(definition);
-                definition = formatContentPlain(parsed);
+                if(parsed.type === 'structured-content') {
+                  definition = formatContentPlain(parsed);
+                }
             }
         } catch(e) {}
     } else if (activeTab === 'dict' && currentData) {
@@ -528,8 +545,9 @@ const DictionaryModal: React.FC<Props> = ({
 
   const switchWebEngine = (engine: WebSearchEngine) => {
       setCurrentWebEngine(engine);
+      setSettings({ ...settings, webSearchEngine: engine }); // Persist selection
       const url = constructWebSearchUrl(engine, searchTerm);
-      navigateToUrl(url);
+      navigateToUrl(url); // Auto-search
   };
 
   const toggleClipboard = () => {
@@ -547,7 +565,7 @@ const DictionaryModal: React.FC<Props> = ({
       
       if (newMode === 'sentence') {
           setSearchTerm(sentence);
-          setHighlightRange({start: 0, end: segments.length - 1});
+          setHighlightRange({start: 0, end: 0});
           fetchDefinition(sentence, dictSource);
           
           const url = constructWebSearchUrl(currentWebEngine, sentence);
@@ -585,9 +603,11 @@ const DictionaryModal: React.FC<Props> = ({
   // Helper function to render definition content for Display (with structured content support)
   const renderDefinitionContent = (definition: string) => {
       try {
-          if (definition.trim().startsWith('{"type":"structured-content"')) {
+          if (definition.trim().startsWith('{')) {
               const parsed = JSON.parse(definition);
-              return <StructuredContent content={parsed} />;
+              if (parsed.type === 'structured-content') {
+                  return <StructuredContent content={parsed} />;
+              }
           }
       } catch (e) { }
       

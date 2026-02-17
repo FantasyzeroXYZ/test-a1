@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, memo, useMemo, useCallback } from 'react';
 import { SubtitleLine, Language, GameType, SegmentationMode, SubtitleMode } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -14,6 +15,7 @@ interface SubtitleRendererProps {
   learningLanguage: string;
   fontSize: number;
   onWordClick: (word: string, line: SubtitleLine, index: number) => void;
+  onSentenceClick: (line: SubtitleLine) => void;
   onTextHover?: (event: React.MouseEvent, text: string, line: SubtitleLine, index: number) => void; 
   onTextClick?: (event: React.MouseEvent, text: string, line: SubtitleLine, index: number) => void; 
   segmentationMode: SegmentationMode;
@@ -21,6 +23,7 @@ interface SubtitleRendererProps {
   isScanning: boolean;
   onShiftTimeline: (seconds: number) => void;
   subtitleMode: SubtitleMode;
+  dictMode: 'word' | 'sentence';
   yomitanMode: boolean; 
   yomitanHighlight?: { lineId: string; start: number; length: number; pinned?: boolean }; 
   showSubtitles?: boolean;
@@ -41,9 +44,11 @@ const SubtitleItem = memo(({
   t, 
   fontSize, 
   onWordClick,
+  onSentenceClick,
   onTextHover,
   onTextClick, 
   segmentationMode,
+  dictMode,
   yomitanMode,
   yomitanHighlight,
   onTranslateClick,
@@ -65,6 +70,22 @@ const SubtitleItem = memo(({
           {t.segmentPrefix} {segmentIdMatch ? segmentIdMatch[0] : "0"}
         </span>
       );
+    }
+
+    if (!yomitanMode && dictMode === 'sentence') {
+        return (
+            <span
+                className="cursor-pointer"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (showSubtitles) {
+                        onSentenceClick(line);
+                    }
+                }}
+            >
+                {line.text}
+            </span>
+        );
     }
 
     let wordIndexCounter = 0;
@@ -124,17 +145,11 @@ const SubtitleItem = memo(({
 
   return (
     <div 
-      onClick={() => {
-          // If active AND in yomitan mode, clicking the background (non-word) should NOT seek.
-          // Only seeking via previous/next buttons or specific UI actions allowed.
-          // Clicking NON-active lines is fine to seek.
-          if (isActive && yomitanMode) return;
-          onSeek(line.start);
-      }}
-      className={`group relative flex items-center justify-center py-1 md:py-1.5 px-6 rounded-2xl text-center cursor-pointer transition-all duration-300 ${
+      // Disabled onClick seeking here as requested. Use SubtitleListPanel or prev/next controls for explicit seeking.
+      className={`group relative flex items-center justify-center py-1 md:py-1.5 px-6 rounded-2xl text-center transition-all duration-300 ${
         isActive 
           ? 'bg-white dark:bg-slate-800/60 text-slate-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 shadow-xl scale-100 opacity-100' 
-          : 'text-slate-400 dark:text-slate-500 opacity-40 scale-95 hover:opacity-80'
+          : 'text-slate-400 dark:text-slate-500 opacity-40 scale-95'
       }`} 
       style={{ fontSize: isActive ? `${fontSize}px` : `${Math.max(12, fontSize * 0.85)}px`, willChange: 'transform, opacity' }}
     >
@@ -156,12 +171,13 @@ const SubtitleItem = memo(({
       prev.line.id === next.line.id && 
       prev.fontSize === next.fontSize &&
       prev.yomitanMode === next.yomitanMode &&
-      prev.yomitanHighlight === next.yomitanHighlight
+      prev.yomitanHighlight === next.yomitanHighlight &&
+      prev.dictMode === next.dictMode
   );
 });
 
 export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({ 
-  subtitles, activeSubtitleIndex, onSeek, gameType, language, learningLanguage, fontSize, onWordClick, onTextHover, onTextClick, onTranslateClick, segmentationMode, onAutoSegment, isScanning, onShiftTimeline, subtitleMode, yomitanMode, yomitanHighlight, showSubtitles = true
+  subtitles, activeSubtitleIndex, onSeek, gameType, language, learningLanguage, fontSize, onWordClick, onSentenceClick, onTextHover, onTextClick, onTranslateClick, segmentationMode, onAutoSegment, isScanning, onShiftTimeline, subtitleMode, dictMode, yomitanMode, yomitanHighlight, showSubtitles = true
 }) => {
   const t = getTranslation(language);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -171,6 +187,7 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
     if (activeSubtitleIndex === -1) return;
     const targetContainer = containerRef.current;
     if (!targetContainer) return;
+    
     let targetElement: HTMLElement | null = null;
     if (subtitleMode === 'single') targetElement = targetContainer.firstElementChild as HTMLElement;
     else if (isLargeDataset) {
@@ -180,11 +197,9 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
     } else {
         targetElement = targetContainer.children[activeSubtitleIndex] as HTMLElement;
     }
+
     if (targetElement) {
-        const containerRect = targetContainer.getBoundingClientRect();
-        const elementRect = targetElement.getBoundingClientRect();
-        const isCentered = (elementRect.top > containerRect.top + containerRect.height * 0.3) && (elementRect.bottom < containerRect.bottom - containerRect.height * 0.3);
-        if (!isCentered) requestAnimationFrame(() => targetElement!.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [activeSubtitleIndex, isLargeDataset, subtitleMode]);
 
@@ -225,16 +240,19 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
             t={t}
             fontSize={fontSize}
             onWordClick={onWordClick}
+            onSentenceClick={onSentenceClick}
             onTextHover={onTextHover}
             onTextClick={onTextClick}
             onTranslateClick={onTranslateClick}
             segmentationMode={segmentationMode}
+            dictMode={dictMode}
             yomitanMode={yomitanMode}
             yomitanHighlight={yomitanHighlight}
             showSubtitles={showSubtitles}
           />
         ))}
-        <div className="h-64 shrink-0" />
+        {/* Spacer to ensure last item can be centered */}
+        <div className="h-[50vh] shrink-0" />
       </div>
     </div>
   );

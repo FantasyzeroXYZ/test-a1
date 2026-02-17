@@ -48,30 +48,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [dictionaries, setDictionaries] = useState<DictionaryMeta[]>([]);
   const [importAbortController, setImportAbortController] = useState<AbortController | null>(null);
   
-  // Anki Fetch State
   const [ankiDecks, setAnkiDecks] = useState<string[]>([]);
   const [ankiModels, setAnkiModels] = useState<string[]>([]);
   const [ankiFields, setAnkiFields] = useState<string[]>([]);
   const [ankiConnected, setAnkiConnected] = useState(false);
   const [ankiConfigMode, setAnkiConfigMode] = useState<'word' | 'sentence'>('word');
 
-  // Dictionary Management State
   const [viewDictType, setViewDictType] = useState<DictImportType>('definition');
   const [viewDictLang, setViewDictLang] = useState<string>('all'); 
 
-  // Keybinding State
   const [isKeyBindingActive, setIsKeyBindingActive] = useState(false);
   const [tempKeybindings, setTempKeybindings] = useState<SceneKeybindings>(readerSettings.keybindings);
   const [bindingKeyTarget, setBindingKeyTarget] = useState<string | null>(null);
 
-  // Dictionary Import State
   const [dictImportScope, setDictImportScope] = useState<LearningLanguage | 'universal'>('universal');
   const [dictImportType, setDictImportType] = useState<DictImportType>('definition');
   
-  // Web Search Local State
   const [searchCategory, setSearchCategory] = useState<WebSearchCategory>('translate');
 
-  // Determine initial category based on engine
   useEffect(() => {
     if (['google', 'baidu', 'bing'].includes(webSearchEngine)) setSearchCategory('search');
     else if (['wikipedia', 'baidu_baike', 'moegirl'].includes(webSearchEngine)) setSearchCategory('encyclopedia');
@@ -226,20 +220,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     try {
         const zip = await JSZip.loadAsync(file);
         let dictTitle = file.name;
-        
         if (zip.file('index.json')) {
             const indexText = await zip.file('index.json').async('string');
-            try {
-                const indexData = JSON.parse(indexText);
-                if (indexData.title) dictTitle = indexData.title;
-            } catch (e) {}
+            try { const indexData = JSON.parse(indexText); if (indexData.title) dictTitle = indexData.title; } catch (e) {}
         }
-
         const dictionaryId = crypto.randomUUID();
         const entries: LocalDictEntry[] = [];
         const batchSize = 2000;
         let totalCount = 0;
-        
         const filePattern = dictImportType === 'definition' ? 'term_bank' : 'term_meta_bank';
         const files = Object.keys(zip.files).filter(f => f.includes(filePattern) && f.endsWith('.json'));
         
@@ -253,96 +241,49 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         for (let i = 0; i < files.length; i++) {
             if (controller.signal.aborted) throw new Error("Import Aborted");
-
             setImportProgress(`Parsing bank ${i + 1}/${files.length}...`);
             const fileName = files[i];
             const content = await zip.file(fileName).async('string');
             const data = JSON.parse(content);
-            
             for (const item of data) {
                 if (controller.signal.aborted) throw new Error("Import Aborted");
                 if (!Array.isArray(item)) continue;
-                
                 if (dictImportType === 'definition') {
                     const term = item[0];
                     const reading = item[1];
                     const glossary = item[5]; 
                     const tagsData = item[7] || ''; 
                     const tags = typeof tagsData === 'string' && tagsData ? tagsData.split(' ') : [];
-                    
                     let definitions: string[] = [];
                     if (Array.isArray(glossary)) {
                         definitions = glossary.map((g: any) => {
                             if (typeof g === 'string') return g;
-                            if (g && g.content) return JSON.stringify(g); 
                             return JSON.stringify(g);
                         });
                     }
-                    
-                    entries.push({
-                        term,
-                        reading,
-                        definitions,
-                        tags, 
-                        dictionaryId: dictionaryId
-                    });
+                    entries.push({ term, reading, definitions, tags, dictionaryId: dictionaryId });
                 } else {
                     const term = item[0];
                     const mode = item[1];
                     const metaData = item[2];
-                    
                     let tagValue = '';
-                    if (mode === 'freq' && metaData && metaData.frequency) {
-                        tagValue = metaData.frequency.displayValue || metaData.frequency.value;
-                    } else if (typeof metaData === 'string') {
-                        tagValue = metaData;
-                    } else if (typeof metaData === 'number') {
-                        tagValue = String(metaData);
-                    }
-                    
-                    if (tagValue) {
-                        entries.push({
-                            term,
-                            definitions: [String(tagValue)],
-                            dictionaryId: dictionaryId
-                        });
-                    }
+                    if (mode === 'freq' && metaData && metaData.frequency) { tagValue = metaData.frequency.displayValue || metaData.frequency.value; } 
+                    else if (typeof metaData === 'string') { tagValue = metaData; } 
+                    else if (typeof metaData === 'number') { tagValue = String(metaData); }
+                    if (tagValue) { entries.push({ term, definitions: [String(tagValue)], dictionaryId: dictionaryId }); }
                 }
-
                 totalCount++;
-                
-                if (entries.length >= batchSize) {
-                   await saveDictionaryBatch(entries);
-                   entries.length = 0; 
-                }
+                if (entries.length >= batchSize) { await saveDictionaryBatch(entries); entries.length = 0; }
             }
         }
-        
-        if (entries.length > 0) {
-            await saveDictionaryBatch(entries);
-        }
-
-        await saveDictionaryMeta({
-            id: dictionaryId,
-            name: dictTitle,
-            type: dictImportType, 
-            scope: dictImportScope,
-            count: totalCount,
-            priority: Date.now(),
-            importedAt: Date.now()
-        });
-        
+        if (entries.length > 0) { await saveDictionaryBatch(entries); }
+        await saveDictionaryMeta({ id: dictionaryId, name: dictTitle, type: dictImportType, scope: dictImportScope, count: totalCount, priority: Date.now(), importedAt: Date.now() });
         const typeStr = dictImportType === 'definition' ? t.dictTypeDefinition : t.dictTypeTag;
         alert(t.dictImportSuccess.replace('{title}', dictTitle).replace('{type}', typeStr).replace('{count}', String(totalCount)));
         await refreshDictionaries();
-
     } catch (err: any) {
-        if (err.message === "Import Aborted") {
-            alert("Import cancelled by user.");
-        } else {
-            console.error(err);
-            alert(t.dictImportFailed.replace('{error}', String(err)));
-        }
+        if (err.message === "Import Aborted") { alert("Import cancelled by user."); } 
+        else { console.error(err); alert(t.dictImportFailed.replace('{error}', String(err))); }
     } finally {
         setIsImportingDict(false);
         setImportProgress('');
@@ -354,54 +295,36 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleTransformImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      
       const reader = new FileReader();
       reader.onload = (ev) => {
           try {
               const content = ev.target?.result as string;
-              // Validate parsing before saving
               const parsed = parseTransforms(content);
-              if (parsed) {
-                  localStorage.setItem('lf_transforms', content);
-                  deinflector.load(parsed.language, parsed);
-                  alert(t.transformLoadSuccess);
-              } else {
-                  alert(t.transformParseError);
-              }
-          } catch (err) {
-              alert(t.transformReadError);
-          }
+              if (parsed) { localStorage.setItem('lf_transforms', content); deinflector.load(parsed.language, parsed); alert(t.transformLoadSuccess); } 
+              else { alert(t.transformParseError); }
+          } catch (err) { alert(t.transformReadError); }
       };
       reader.readAsText(file);
       e.target.value = "";
   };
 
   const handleDeleteDictionary = async (id: string, name: string) => {
-      if (confirm(t.confirmDeleteDict.replace('{name}', name))) {
-          await deleteDictionary(id);
-          await refreshDictionaries();
-      }
+      if (confirm(t.confirmDeleteDict.replace('{name}', name))) { await deleteDictionary(id); await refreshDictionaries(); }
   };
 
   const handleMoveDictionary = async (index: number, direction: 'up' | 'down') => {
       const filtered = dictionaries.filter(d => d.type === viewDictType && (viewDictLang === 'all' || d.scope === viewDictLang));
       if (index < 0 || index >= filtered.length) return;
-
       const currentItem = filtered[index];
       let swapItem: DictionaryMeta | null = null;
-      
       if (direction === 'up' && index > 0) swapItem = filtered[index - 1];
       if (direction === 'down' && index < filtered.length - 1) swapItem = filtered[index + 1];
-      
       if (!swapItem) return;
-
       const tempP = currentItem.priority;
       currentItem.priority = swapItem.priority;
       swapItem.priority = tempP;
-      
       await updateDictionary(currentItem.id, { priority: currentItem.priority });
       await updateDictionary(swapItem.id, { priority: swapItem.priority });
-      
       await refreshDictionaries();
   };
 
@@ -425,25 +348,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const renderSearchOptions = () => {
       switch(searchCategory) {
-          case 'search':
-              return <><option value="google">Google</option><option value="baidu">Baidu</option><option value="bing">Bing</option></>;
-          case 'encyclopedia':
-              return <><option value="wikipedia">Wikipedia</option><option value="baidu_baike">Baidu Baike</option><option value="moegirl">Moegirl</option></>;
-          case 'translate':
-          default:
-              return <><option value="bing_trans">Bing Translator</option><option value="baidu_trans">Baidu</option><option value="sogou_trans">Sogou</option></>;
+          case 'search': return <><option value="google">Google</option><option value="baidu">Baidu</option><option value="bing">Bing</option></>;
+          case 'encyclopedia': return <><option value="wikipedia">Wikipedia</option><option value="baidu_baike">Baidu Baike</option><option value="moegirl">Moegirl</option></>;
+          case 'translate': default: return <><option value="bing_trans">Bing Translator</option><option value="baidu_trans">Baidu</option><option value="sogou_trans">Sogou</option></>;
       }
   };
 
-  const toggleTheme = (theme: Theme) => {
-      setReaderSettings({...readerSettings, theme});
-  };
+  const toggleTheme = (theme: Theme) => { setReaderSettings({...readerSettings, theme}); };
 
   const handleExportSettings = () => {
-      const data = {
-          settings: readerSettings,
-          ankiSettings: ankiSettings,
-      };
+      const data = { settings: readerSettings, ankiSettings: ankiSettings, };
       const json = JSON.stringify(data, null, 2);
       downloadFile(json, 'linguaflow_settings.json', 'application/json');
   };
@@ -451,7 +365,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleImportSettings = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      
       const reader = new FileReader();
       reader.onload = (ev) => {
           try {
@@ -459,70 +372,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               if (data.settings) setReaderSettings(data.settings);
               if (data.ankiSettings) setAnkiSettings(data.ankiSettings);
               alert(t.importSuccess);
-          } catch (err) {
-              alert(t.importError);
-          }
+          } catch (err) { alert(t.importError); }
       };
       reader.readAsText(file);
       e.target.value = ""; 
   };
 
   const getSceneLabel = (scene: string) => {
-     switch(scene) {
-         case 'library': return t.scLibrary;
-         case 'player': return t.scPlayer;
-         case 'dictionary': return t.scDictionary;
-         default: return scene.toUpperCase();
-     }
+     switch(scene) { case 'library': return t.scLibrary; case 'player': return t.scPlayer; case 'dictionary': return t.scDictionary; default: return scene.toUpperCase(); }
   };
 
   const getActionLabel = (key: string) => {
-      const map: Record<string, string> = {
-          'playPause': t.keyPlayPause,
-          'rewind': t.keyRewind,
-          'forward': t.keyForward,
-          'sidebar': t.keySidebar,
-          'dict': t.keyDict,
-          'close': t.keyClose,
-          'addAnki': t.keyAddAnki,
-          'replay': t.keyReplay,
-          'import': t.keyImport,
-          'settings': t.keySettings
-      };
+      const map: Record<string, string> = { 'playPause': t.keyPlayPause, 'rewind': t.keyRewind, 'forward': t.keyForward, 'sidebar': t.keySidebar, 'dict': t.keyDict, 'close': t.keyClose, 'addAnki': t.keyAddAnki, 'replay': t.keyReplay, 'import': t.keyImport, 'settings': t.keySettings };
       return map[key] || key;
   };
 
   const learningLanguages: LearningLanguage[] = ['en', 'zh', 'ja', 'es', 'ru', 'fr'];
   const getLangName = (code: LearningLanguage) => {
-      switch(code) {
-          case 'en': return t.langEn;
-          case 'zh': return t.langZh;
-          case 'ja': return t.langJa;
-          case 'es': return t.langEs;
-          case 'ru': return t.langRu;
-          case 'fr': return t.langFr;
-          default: return code;
-      }
+      switch(code) { case 'en': return t.langEn; case 'zh': return t.langZh; case 'ja': return t.langJa; case 'es': return t.langEs; case 'ru': return t.langRu; case 'fr': return t.langFr; default: return code; }
   };
 
   const currentAnkiFieldMap = ankiConfigMode === 'word' ? ankiSettings.fieldMap : (ankiSettings.sentenceFieldMap as any || {});
-  
-  const availableFields = ankiConfigMode === 'word' 
-      ? ['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab']
-      : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; 
-
+  const availableFields = ankiConfigMode === 'word' ? ['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab'] : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; 
   const updateAnkiField = (fieldType: string, value: string) => {
-      if (ankiConfigMode === 'word') {
-          setAnkiSettings({
-              ...ankiSettings,
-              fieldMap: { ...ankiSettings.fieldMap, [fieldType]: value }
-          });
-      } else {
-          setAnkiSettings({
-              ...ankiSettings,
-              sentenceFieldMap: { ...ankiSettings.sentenceFieldMap, [fieldType]: value }
-          });
-      }
+      if (ankiConfigMode === 'word') { setAnkiSettings({ ...ankiSettings, fieldMap: { ...ankiSettings.fieldMap, [fieldType]: value } }); } 
+      else { setAnkiSettings({ ...ankiSettings, sentenceFieldMap: { ...ankiSettings.sentenceFieldMap, [fieldType]: value } }); }
   };
 
   if (!isOpen) return null;
@@ -542,43 +416,53 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
           {openSections.has('general') && (
             <div className="p-4 space-y-4 bg-white dark:bg-slate-800/30 transition-colors">
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.theme}</label>
-                  <div className="flex bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded p-1 transition-colors">
-                      <button onClick={() => toggleTheme('light')} className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.theme === 'light' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{t.themeLight}</button>
-                      <button onClick={() => toggleTheme('dark')} className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.theme === 'dark' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{t.themeDark}</button>
-                  </div>
+               <div className="grid grid-cols-2 gap-4">
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.theme}</label>
+                      <div className="flex bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded p-1 transition-colors">
+                          <button onClick={() => toggleTheme('light')} className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.theme === 'light' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{t.themeLight}</button>
+                          <button onClick={() => toggleTheme('dark')} className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.theme === 'dark' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{t.themeDark}</button>
+                      </div>
+                   </div>
+                   <div className="flex flex-col justify-end">
+                        <div className="flex items-center justify-between bg-gray-50 dark:bg-slate-800/50 p-2 rounded border border-gray-200 dark:border-slate-700">
+                            <span className="text-xs text-slate-700 dark:text-slate-300">{t.clipboardMode}</span>
+                            <input type="checkbox" checked={readerSettings.copyToClipboard} onChange={e => setReaderSettings({...readerSettings, copyToClipboard: e.target.checked})} className="accent-indigo-600" />
+                        </div>
+                   </div>
                </div>
-               <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-700 dark:text-slate-300">{t.clipboardMode}</span>
-                  <input type="checkbox" checked={readerSettings.copyToClipboard} onChange={e => setReaderSettings({...readerSettings, copyToClipboard: e.target.checked})} className="accent-indigo-600" />
-               </div>
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.language}</label>
-                  <select value={language} onChange={(e) => setLanguage(e.target.value as Language)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="zh">{t.langZh}</option><option value="zh-TW">繁体中文</option><option value="en">{t.langEn}</option></select>
+
+               <div className="grid grid-cols-2 gap-4">
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.language}</label>
+                      <select value={language} onChange={(e) => setLanguage(e.target.value as Language)} className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="zh">{t.langZh}</option><option value="zh-TW">繁体中文</option><option value="en">{t.langEn}</option></select>
+                   </div>
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.learningLanguage}</label>
+                      <select value={learningLanguage} onChange={(e) => setLearningLanguage(e.target.value as LearningLanguage)} className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="en">{t.langEn}</option><option value="zh">{t.langZh}</option><option value="ja">{t.langJa}</option><option value="es">{t.langEs}</option><option value="ru">{t.langRu}</option><option value="fr">{t.langFr}</option></select>
+                   </div>
                </div>
                
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.searchCategory}</label>
-                  <select value={searchCategory} onChange={(e) => setSearchCategory(e.target.value as WebSearchCategory)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none mb-2 transition-colors">
-                      <option value="search">{t.catSearch}</option>
-                      <option value="translate">{t.catTranslate}</option>
-                      <option value="encyclopedia">{t.catEncyclopedia}</option>
-                  </select>
-                  
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.searchProvider}</label>
-                  <select value={webSearchEngine} onChange={(e) => setWebSearchEngine(e.target.value as WebSearchEngine)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors">
-                      {renderSearchOptions()}
-                  </select>
+               <div className="grid grid-cols-2 gap-4">
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.searchCategory}</label>
+                      <select value={searchCategory} onChange={(e) => setSearchCategory(e.target.value as WebSearchCategory)} className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors">
+                          <option value="search">{t.catSearch}</option>
+                          <option value="translate">{t.catTranslate}</option>
+                          <option value="encyclopedia">{t.catEncyclopedia}</option>
+                      </select>
+                   </div>
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.searchProvider}</label>
+                      <select value={webSearchEngine} onChange={(e) => setWebSearchEngine(e.target.value as WebSearchEngine)} className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors">
+                          {renderSearchOptions()}
+                      </select>
+                   </div>
                </div>
 
                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.learningLanguage}</label>
-                  <select value={learningLanguage} onChange={(e) => setLearningLanguage(e.target.value as LearningLanguage)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="en">{t.langEn}</option><option value="zh">{t.langZh}</option><option value="ja">{t.langJa}</option><option value="es">{t.langEs}</option><option value="ru">{t.langRu}</option><option value="fr">{t.langFr}</option></select>
-               </div>
-               <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.segMode}</label>
-                  <select value={segmentationMode} onChange={(e) => setSegmentationMode(e.target.value as SegmentationMode)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="browser">{t.segBrowser}</option><option value="mecab">{t.segMecab}</option><option value="none">{t.segNone}</option></select>
+                  <select value={segmentationMode} onChange={(e) => setSegmentationMode(e.target.value as SegmentationMode)} className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="browser">{t.segBrowser}</option><option value="mecab">{t.segMecab}</option><option value="none">{t.segNone}</option></select>
                </div>
             </div>
           )}
@@ -641,7 +525,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                </div>
                
-               {/* ... rest of the file ... */}
                <div className="flex flex-col gap-2 pb-2 border-b border-gray-200 dark:border-slate-700">
                     <div className="flex items-center justify-between">
                         <div className="flex flex-col">
@@ -665,7 +548,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     )}
                </div>
 
-               {/* New: Text Processing Section */}
                <div className="flex flex-col gap-2 pb-2 border-b border-gray-200 dark:border-slate-700">
                   <label className="text-[10px] font-bold text-slate-500 uppercase">{t.textAnalysis}</label>
                   <div className="flex items-center justify-between">
@@ -754,13 +636,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
           {openSections.has('interface') && (
             <div className="p-4 space-y-4 bg-white dark:bg-slate-800/30 transition-colors">
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.subtitleMode}</label>
-                  <select value={subtitleMode} onChange={(e) => setSubtitleMode(e.target.value as SubtitleMode)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="scroll">{t.modeScroll}</option><option value="single">{t.modeSingle}</option></select>
-               </div>
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.fontSize}</label>
-                  <input type="range" min="12" max="48" value={subtitleFontSize} onChange={(e) => setSubtitleFontSize(parseInt(e.target.value))} className="w-full accent-indigo-600" />
+               <div className="grid grid-cols-2 gap-4">
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.subtitleMode}</label>
+                      <select value={subtitleMode} onChange={(e) => setSubtitleMode(e.target.value as SubtitleMode)} className="w-full bg-white dark:bg-slate-900 text-sm text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none transition-colors"><option value="scroll">{t.modeScroll}</option><option value="single">{t.modeSingle}</option></select>
+                   </div>
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.fontSize}</label>
+                      <input type="range" min="12" max="48" value={subtitleFontSize} onChange={(e) => setSubtitleFontSize(parseInt(e.target.value))} className="w-full accent-indigo-600" />
+                   </div>
                </div>
             </div>
           )}
@@ -786,13 +670,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                 ))}
                             </select>
                         </div>
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{t.ttsRate}: {readerSettings.ttsRate}x</label>
-                            <input type="range" min="0.5" max="2" step="0.1" value={readerSettings.ttsRate} onChange={(e) => setReaderSettings({...readerSettings, ttsRate: parseFloat(e.target.value)})} className="w-full accent-indigo-600" />
-                        </div>
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{t.ttsPitch}: {readerSettings.ttsPitch}</label>
-                            <input type="range" min="0" max="2" step="0.1" value={readerSettings.ttsPitch} onChange={(e) => setReaderSettings({...readerSettings, ttsPitch: parseFloat(e.target.value)})} className="w-full accent-indigo-600" />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{t.ttsRate}: {readerSettings.ttsRate}x</label>
+                                <input type="range" min="0.5" max="2" step="0.1" value={readerSettings.ttsRate} onChange={(e) => setReaderSettings({...readerSettings, ttsRate: parseFloat(e.target.value)})} className="w-full accent-indigo-600" />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{t.ttsPitch}: {readerSettings.ttsPitch}</label>
+                                <input type="range" min="0" max="2" step="0.1" value={readerSettings.ttsPitch} onChange={(e) => setReaderSettings({...readerSettings, ttsPitch: parseFloat(e.target.value)})} className="w-full accent-indigo-600" />
+                            </div>
                         </div>
                         <div>
                             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{t.ttsVolume}: {readerSettings.ttsVolume}</label>
@@ -816,6 +702,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           )}
           
+          {/* Shortcuts and Anki sections remain structurally similar but ensure compact spacing if applicable */}
           <button onClick={() => toggleSection('shortcuts')} className="w-full flex items-center justify-between p-4 bg-gray-50/50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-700/50 border-b border-gray-200 dark:border-slate-700/50 text-left transition-colors">
             <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">{t.shortcuts}</span>
           </button>
@@ -895,18 +782,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           )}
 
+          {/* Anki Section */}
           <button onClick={() => toggleSection('anki')} className="w-full flex items-center justify-between p-4 bg-gray-50/50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-700/50 border-b border-gray-200 dark:border-slate-700/50 text-left transition-colors">
             <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase">{t.ankiSettings}</span>
           </button>
           {openSections.has('anki') && (
             <div className="p-4 space-y-4 bg-white dark:bg-slate-800/30 transition-colors">
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiHost}</label>
-                  <input type="text" placeholder="127.0.0.1" value={ankiSettings.host} onChange={(e) => setAnkiSettings({...ankiSettings, host: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-sm transition-colors" />
-               </div>
-               <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiPort}</label>
-                  <input type="number" placeholder="8765" value={ankiSettings.port} onChange={(e) => setAnkiSettings({...ankiSettings, port: parseInt(e.target.value)})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-sm transition-colors" />
+               <div className="grid grid-cols-2 gap-4">
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiHost}</label>
+                      <input type="text" placeholder="127.0.0.1" value={ankiSettings.host} onChange={(e) => setAnkiSettings({...ankiSettings, host: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs transition-colors" />
+                   </div>
+                   <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiPort}</label>
+                      <input type="number" placeholder="8765" value={ankiSettings.port} onChange={(e) => setAnkiSettings({...ankiSettings, port: parseInt(e.target.value)})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs transition-colors" />
+                   </div>
                </div>
                
                {/* New Toggle for Bolding */}
@@ -917,6 +807,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
                <button onClick={checkAnkiConnection} className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold text-xs shadow-md transition-all">{t.ankiTest}</button>
 
+               {/* ... (Anki Connected Details remain same) ... */}
                {ankiConnected && (
                    <div className="pt-4 border-t border-gray-200 dark:border-slate-700 space-y-4 animate-fade-in">
                        <div>

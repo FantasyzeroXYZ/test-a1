@@ -9,6 +9,7 @@ interface TranslationPopupProps {
   t: { [key: string]: string };
   initialEngine: WebSearchEngine;
   language: Language;
+  onEngineChange: (engine: WebSearchEngine) => void;
 }
 
 const getTargetLangCode = (appLang: Language) => {
@@ -29,7 +30,7 @@ const constructWebSearchUrl = (engine: WebSearchEngine, term: string, targetLang
 const translationEngines: WebSearchEngine[] = ['bing_trans', 'baidu_trans', 'sogou_trans'];
 
 export const TranslationPopup: React.FC<TranslationPopupProps> = ({ 
-    position, sentence, onClose, t, initialEngine, language
+    position, sentence, onClose, t, initialEngine, language, onEngineChange
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [currentEngine, setCurrentEngine] = useState<WebSearchEngine>(translationEngines.includes(initialEngine) ? initialEngine : 'bing_trans');
@@ -44,6 +45,11 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
+
+  const handleEngineChange = (engine: WebSearchEngine) => {
+      setCurrentEngine(engine);
+      onEngineChange(engine);
+  };
 
   const style: React.CSSProperties = {
     position: 'fixed',
@@ -64,7 +70,7 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
                 <span className="text-xs font-bold text-slate-600 dark:text-slate-300">{t.sentenceTranslation}</span>
                 <select 
                     value={currentEngine}
-                    onChange={(e) => setCurrentEngine(e.target.value as WebSearchEngine)}
+                    onChange={(e) => handleEngineChange(e.target.value as WebSearchEngine)}
                     className="ml-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded text-[10px] p-1 outline-none text-slate-800 dark:text-white"
                 >
                     <option value="bing_trans">Bing</option>

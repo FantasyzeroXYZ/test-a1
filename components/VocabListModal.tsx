@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Language, TableEntry } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -10,7 +11,7 @@ interface VocabListModalProps {
     onUpdate: () => void; // Callback to trigger app update if needed
 }
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 15;
 
 export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose, language, onUpdate }) => {
     const t = getTranslation(language);
@@ -40,6 +41,8 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
 
     const saveEntries = (newEntries: TableEntry[]) => {
         localStorage.setItem('lf_vocab_table', JSON.stringify(newEntries));
+        // Ensure list is re-sorted after potential edit
+        newEntries.sort((a, b) => b.addedAt - a.addedAt);
         setEntries(newEntries);
         onUpdate();
     };
@@ -67,6 +70,7 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
         const header = ["Word", "Definition", "Sentence", "Translation", "Tags", "Source", "Time Range", "Date"];
         const csvRows = [header.join(',')];
 
+        // Use the full, sorted list for export
         entries.forEach(row => {
             const cols = [
                 `"${(row.word || '').replace(/"/g, '""')}"`,
@@ -144,9 +148,9 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                         </div>
                     ) : (
                         paginatedEntries.map(entry => (
-                            <div key={entry.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm relative group">
+                            <div key={entry.id} className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm relative group">
                                 {editingId === entry.id ? (
-                                    <div className="space-y-3">
+                                    <div className="space-y-3 p-2">
                                         <input 
                                             value={editForm.word || ''} 
                                             onChange={e => setEditForm({...editForm, word: e.target.value})}
@@ -157,7 +161,7 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                                             value={editForm.definition || ''} 
                                             onChange={e => setEditForm({...editForm, definition: e.target.value})}
                                             className="w-full p-2 text-sm border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white"
-                                            rows={3}
+                                            rows={5}
                                             placeholder={t.placeholderDefinition}
                                         />
                                         <div className="flex justify-end gap-2">
@@ -166,32 +170,25 @@ export const VocabListModal: React.FC<VocabListModalProps> = ({ isOpen, onClose,
                                         </div>
                                     </div>
                                 ) : (
-                                    <>
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div>
-                                                <h3 className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{entry.word}</h3>
-                                                <span className="text-[10px] text-slate-400">{new Date(entry.addedAt).toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => startEdit(entry)} className="text-slate-400 hover:text-amber-500"><i className="fa-solid fa-pencil"></i></button>
-                                                <button onClick={() => handleDelete(entry.id)} className="text-slate-400 hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-base font-bold text-indigo-600 dark:text-indigo-400 truncate">{entry.word}</h3>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700/50 px-1.5 py-0.5 rounded">
+                                                    <i className="fa-solid fa-calendar-alt mr-1"></i>
+                                                    {new Date(entry.addedAt).toLocaleDateString()}
+                                                </span>
+                                                <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700/50 px-1.5 py-0.5 rounded truncate">
+                                                    <i className="fa-solid fa-music mr-1"></i>
+                                                    {entry.sourceTitle}
+                                                </span>
                                             </div>
                                         </div>
-                                        
-                                        <div className="text-sm text-slate-700 dark:text-slate-300 mb-2 whitespace-pre-wrap font-serif bg-slate-50 dark:bg-slate-900/50 p-2 rounded">
-                                            {entry.definition}
+                                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => startEdit(entry)} className="p-2 text-slate-400 hover:text-amber-500"><i className="fa-solid fa-pencil"></i></button>
+                                            <button onClick={() => handleDelete(entry.id)} className="p-2 text-slate-400 hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
                                         </div>
-                                        
-                                        <div className="text-xs text-slate-500 dark:text-slate-400 italic mb-1 border-l-2 border-slate-300 pl-2">
-                                            {entry.sentence}
-                                        </div>
-                                        {entry.sourceTitle && (
-                                            <div className="mt-2 flex gap-2 text-[10px] text-slate-400">
-                                                <span className="bg-slate-100 dark:bg-slate-700 px-1.5 rounded"><i className="fa-solid fa-music mr-1"></i>{entry.sourceTitle}</span>
-                                                <span className="bg-slate-100 dark:bg-slate-700 px-1.5 rounded"><i className="fa-solid fa-clock mr-1"></i>{entry.timeRange}</span>
-                                            </div>
-                                        )}
-                                    </>
+                                    </div>
                                 )}
                             </div>
                         ))

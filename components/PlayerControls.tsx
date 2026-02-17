@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { formatTime } from '../utils/parsers';
 import { Language } from '../types';
@@ -93,7 +94,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
              className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-slate-700/50 hover:bg-gray-200 dark:hover:bg-slate-600 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-indigo-500 transition-colors"
              title={t.toggleSidebar}
           >
-             <i className="fa-solid fa-list-ul text-xs"></i>
+             <i className="fa-solid fa-indent text-xs"></i>
           </button>
           
           <select 
@@ -149,26 +150,24 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             <svg className="w-5 h-5 md:w-7 md:h-7" fill="currentColor" viewBox="0 0 20 20"><path d="M4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4zM11.555 5.168A1 1 0 0010 6v8a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4z" /></svg>
           </button>
 
-          {/* Subtitle Toggle Button (Moved here for symmetry and requested placement) */}
-          {onToggleShowSubtitles && (
-            <button 
-              onClick={onToggleShowSubtitles} 
-              className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all ${showSubtitles ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'text-slate-400 hover:text-slate-600'}`}
-              title={t.toggleSubtitles}
-            >
-              {showSubtitles ? <i className="fa-solid fa-closed-captioning text-sm md:text-base"></i> : <i className="fa-regular fa-closed-captioning text-sm md:text-base"></i>}
-            </button>
-          )}
+          {/* AB Loop Button */}
+          <button 
+            onClick={onABLoopToggle} 
+            className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full text-[10px] md:text-xs font-bold transition-all border ${loopA !== null ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-gray-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-gray-100 dark:bg-slate-700/30'}`}
+            title={t.loop}
+          >
+            {abLabel}
+          </button>
         </div>
 
         {/* Right: Loop / Extras */}
         <div className="flex items-center gap-2 justify-end flex-1">
-          <button 
-            onClick={onABLoopToggle} 
-            className={`h-8 md:h-9 px-3 rounded-lg text-[10px] md:text-xs font-bold transition-all border ${loopA !== null ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'border-gray-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-gray-100 dark:bg-slate-700/30'}`}
-            title={t.loop}
+          <button
+              onClick={onSaveBookmark}
+              className="w-8 h-8 md:w-9 md:h-9 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-slate-700/50 text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+              title={t.saveBookmark}
           >
-            {abLabel}
+             <i className="fa-solid fa-bookmark text-xs"></i>
           </button>
         </div>
       </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SUPPORTED_SUBTITLE_TYPES } from './constants';
 import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine, DictionaryResult, DictionaryEntry } from './types';
@@ -12,6 +13,7 @@ import { SubtitleRenderer } from './components/SubtitleRenderer';
 import DictionaryModal from './components/DictionaryModal';
 import { Library } from './components/Library';
 import { SidePanel } from './components/SidePanel';
+import { SubtitleListPanel } from './components/SubtitleListPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { BookmarkModal } from './components/BookmarkModal';
 import { VocabListModal } from './components/VocabListModal';
@@ -101,9 +103,10 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showVocabTable, setShowVocabTable] = useState(false);
   const [showSidePanel, setShowSidePanel] = useState(false);
+  const [showSubtitleList, setShowSubtitleList] = useState(false);
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-  const [isImporting, setIsImporting] = useState(false); // New: Global loading state
+  const [isImporting, setIsImporting] = useState(false); 
 
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]); 
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(null);
@@ -112,7 +115,7 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1); // Track playback rate state
+  const [playbackRate, setPlaybackRate] = useState(1); 
   const [activeSubtitleIndex, setActiveSubtitleIndex] = useState<number>(-1);
   const [loopA, setLoopA] = useState<number | null>(null);
   const [loopB, setLoopB] = useState<number | null>(null);
@@ -155,6 +158,15 @@ const App: React.FC = () => {
 
   const [seenWords, setSeenWords] = useState(new Set<string>());
 
+  // Dark Mode Effect
+  useEffect(() => {
+    if (settings.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings.theme]);
+
   useEffect(() => {
       // Load default rules first
       deinflector.load('ja', japaneseDeinflectionRules);
@@ -185,10 +197,19 @@ const App: React.FC = () => {
   };
 
   const pauseForLookup = () => {
-      wasPlayingRef.current = isPlaying;
-      if (isPlaying) {
-          safePause();
-      }
+    if (!audioRef.current) {
+        wasPlayingRef.current = false;
+        return;
+    }
+    
+    // Read the "playing" state directly from the audio element to avoid state sync issues.
+    const wasPlaying = !audioRef.current.paused;
+    wasPlayingRef.current = wasPlaying;
+
+    if (wasPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+    }
   };
 
   const resumeAfterLookup = () => {
@@ -205,20 +226,17 @@ const App: React.FC = () => {
       const time = audio.currentTime;
       setCurrentTime(time);
 
-      // Logic for AB Loop
       if (loopA !== null && loopB !== null) {
           if (time >= loopB) {
               audio.currentTime = loopA;
-              return; // Avoid further checks
+              return; 
           }
       }
 
-      // Logic for Sentence Repeat
       if (isSentenceRepeat && activeSubtitleIndex !== -1) {
           const sub = subtitles[activeSubtitleIndex];
           if (sub && time >= sub.end) {
-              audio.currentTime = sub.start;
-              // Ensure playing state continues
+              audio.currentTime = sub.start + 0.01;
               if (!isPlaying) safePlay();
           }
       }
@@ -237,8 +255,9 @@ const App: React.FC = () => {
         setAudioTracks(prev => [...prev, newTrack]);
     } catch (err) { alert(t.importFailed); } 
     finally { 
+        // Small timeout to ensure Library detects the change while isImporting is true
+        setTimeout(() => setIsImporting(false), 500);
         e.target.value = ''; 
-        setIsImporting(false); 
     }
   };
 
@@ -295,7 +314,8 @@ const App: React.FC = () => {
   };
 
   const performYomitanAnalysis = useCallback(async (event: React.MouseEvent, line: SubtitleLine, triggerIndex: number) => {
-    const learningLang = settings.learningLanguage;
+    // Explicitly use the memoized scope which prioritizes track language
+    const learningLang = scope;
     const analysisResults: YomitanAnalysisResult[] = [];
     
     const scanSegments: { term: string, start: number }[] = [];
@@ -327,7 +347,7 @@ const App: React.FC = () => {
         return;
     }
 
-    pauseForLookup(); // Pause immediately when analyzing
+    pauseForLookup(); 
 
     for (const segment of scanSegments) {
         const raw = segment.term;
@@ -377,7 +397,6 @@ const App: React.FC = () => {
                         if (deinflectedHeadwordMatch) {
                             foundWords.push({ result: res, source: 'deinflected', reason: deinflectedHeadwordMatch.reasons.join(' ← ') });
                         } else {
-                            // Check reading matches for original input AND deinflected terms
                             const originalReadingMatch = hiragana && res.entries.some(e => e.pronunciations.some(p => p.text === hiragana));
                             
                             const deinflectedReadingMatch = deinflections.find(d => {
@@ -401,7 +420,7 @@ const App: React.FC = () => {
                            foundWords.push({ result: res, source: 'deinflected', reason: match.reasons.join(' ← ') });
                         }
                     }
-                } else { // Chinese and others
+                } else { 
                     if (res.word === raw) {
                         foundWords.push({ result: res, source: 'direct' });
                     }
@@ -435,9 +454,9 @@ const App: React.FC = () => {
         }
     } else {
         setYomitanPopup(null);
-        resumeAfterLookup(); // Resume if no results found
+        resumeAfterLookup(); 
     }
-  }, [scope, settings.learningLanguage, settings.enablePreprocessing, settings.yomitanModeType, isPlaying]);
+  }, [scope, settings.enablePreprocessing, settings.yomitanModeType, isPlaying]);
 
   const handleWordClick = (word: string, line: SubtitleLine, index: number) => {
       if (settings.yomitanMode || !isWord(word)) return;
@@ -446,6 +465,18 @@ const App: React.FC = () => {
           isOpen: true,
           initialWord: word,
           initialSegmentIndex: index,
+          sentence: line.text,
+          contextLine: line,
+      });
+  };
+
+  const handleSentenceClick = (line: SubtitleLine) => {
+      if (settings.yomitanMode) return;
+      pauseForLookup();
+      setDictionaryModalState({
+          isOpen: true,
+          initialWord: line.text,
+          initialSegmentIndex: 0,
           sentence: line.text,
           contextLine: line,
       });
@@ -545,7 +576,6 @@ const App: React.FC = () => {
               setLoopB(current);
               if (audioRef.current) audioRef.current.currentTime = loopA;
           } else {
-              // If B is before A, reset A to current
               setLoopA(current);
           }
       } else {
@@ -565,7 +595,6 @@ const App: React.FC = () => {
       if (!track) return;
       
       const newBookmarks = [...(track.bookmarks || [])];
-      // Check if editing existing
       const existingIdx = newBookmarks.findIndex(b => b.id === bm.id);
       if (existingIdx !== -1) {
           newBookmarks[existingIdx] = bm;
@@ -587,7 +616,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
       if (audioRef.current) audioRef.current.playbackRate = playbackRate;
-  }, [playbackRate, audioSrc]); // Reset rate when source changes
+  }, [playbackRate, audioSrc]); 
 
   const ttsSettings = { enabled: settings.ttsEnabled, rate: settings.ttsRate, pitch: settings.ttsPitch, volume: settings.ttsVolume, voice: settings.ttsVoice };
 
@@ -606,15 +635,9 @@ const App: React.FC = () => {
             <h1 className="font-bold text-sm truncate max-w-[150px]">{view === 'player' ? audioTracks.find(t=>t.id===currentTrackId)?.title : t.appTitle}</h1>
          </div>
          <div className="flex items-center gap-2">
-            {/* Added Bookmark Button */}
+            {/* Added Subtitle List Button Top Right */}
             {view === 'player' && (
-                <button onClick={() => setShowBookmarkModal(true)} className="p-2 text-indigo-500 hover:text-indigo-600 transition-colors">
-                    <i className="fa-solid fa-bookmark"></i>
-                </button>
-            )}
-            {/* Added Show SidePanel Button (Subtitle List) */}
-            {view === 'player' && (
-                <button onClick={() => setShowSidePanel(true)} className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white transition-colors">
+                <button onClick={() => setShowSubtitleList(true)} className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white transition-colors" title="Subtitle List">
                     <i className="fa-solid fa-list-ul"></i>
                 </button>
             )}
@@ -627,7 +650,7 @@ const App: React.FC = () => {
            <Library tracks={audioTracks} onTrackSelect={track => { setCurrentTrackId(track.id); setAudioSrc(track.url); setSubtitles(track.subtitles || []); setView('player'); setTimeout(safePlay, 100); }} language={settings.language} onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} onTrackUpdate={(id, up) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...up} : t)); updateTrackMetadataInDB(id, up); }} onImport={handleImport} onReplaceFile={()=>{}} onImportLink={()=>{}} onImportSubtitle={handleImportSubtitle} isImporting={isImporting} />
          ) : (
            <div className="flex-1 flex flex-col h-full relative">
-              <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} gameType="none" language={settings.language} learningLanguage={settings.learningLanguage} fontSize={settings.subtitleFontSize} onWordClick={handleWordClick} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} />
+              <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} gameType="none" language={settings.language} learningLanguage={scope} fontSize={settings.subtitleFontSize} onWordClick={handleWordClick} onSentenceClick={handleSentenceClick} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} dictMode={settings.dictMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} />
               
               <SidePanel 
                   isOpen={showSidePanel} 
@@ -639,6 +662,15 @@ const App: React.FC = () => {
                   onEditBookmark={()=>{}}
                   language={settings.language}
                   currentTrack={audioTracks.find(t => t.id === currentTrackId)}
+              />
+
+              <SubtitleListPanel
+                  isOpen={showSubtitleList}
+                  onClose={() => setShowSubtitleList(false)}
+                  subtitles={subtitles}
+                  activeSubtitleIndex={activeSubtitleIndex}
+                  onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); } }}
+                  language={settings.language}
               />
 
               {showBookmarkModal && (
@@ -671,7 +703,7 @@ const App: React.FC = () => {
                     sentence={dictionaryModalState.sentence}
                     contextLine={dictionaryModalState.contextLine}
                     language={settings.language}
-                    learningLanguage={settings.learningLanguage}
+                    learningLanguage={scope}
                     ankiSettings={ankiSettings}
                     segmentationMode={settings.segmentationMode}
                     webSearchEngine={settings.webSearchEngine}
@@ -681,7 +713,6 @@ const App: React.FC = () => {
                     settings={settings}
                     setSettings={setSettings}
                     hasDictionaries={hasDictionaries}
-                    // For standard dictionary mode, we do NOT auto-close the modal on Anki success
                     onAnkiSuccess={() => { showToast(t.ankiSuccess); }}
                     onTableSuccess={() => { showToast(t.addedToTable); }}
                 />
@@ -700,7 +731,7 @@ const App: React.FC = () => {
                     onAddAllCardsInTab={handleAddAllCardsInTab}
                     seenWords={seenWords}
                     t={t}
-                    learningLanguage={settings.learningLanguage}
+                    learningLanguage={scope}
                     ttsSettings={ttsSettings}
                   />
               )}
@@ -715,6 +746,7 @@ const App: React.FC = () => {
                       t={t}
                       initialEngine={settings.webSearchEngine}
                       language={settings.language}
+                      onEngineChange={(engine) => setSettings({...settings, webSearchEngine: engine})}
                   />
               )}
               <PlayerControls 

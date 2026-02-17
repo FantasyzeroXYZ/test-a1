@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { AudioTrack, Language, LearningLanguage } from '../types';
 import { getTranslation } from '../utils/i18n';
@@ -47,8 +48,9 @@ export const Library: React.FC<LibraryProps> = ({
   const prevTracksLen = useRef(tracks.length);
 
   useEffect(() => {
-      // If track count increases, it means a new track was added. Open edit modal for it.
-      if (tracks.length > prevTracksLen.current) {
+      // Only open edit modal if track count increased AND we are in an importing state
+      // This prevents the modal from opening when tracks are loaded from IndexedDB on refresh
+      if (isImporting && tracks.length > prevTracksLen.current) {
           const newTrack = tracks[tracks.length - 1];
           // Only open if it's a file import (optional, but good UX)
           if (newTrack.file) {
@@ -56,7 +58,7 @@ export const Library: React.FC<LibraryProps> = ({
           }
       }
       prevTracksLen.current = tracks.length;
-  }, [tracks]);
+  }, [tracks, isImporting]);
 
   useEffect(() => {
     if (editingTrack) {
@@ -241,228 +243,152 @@ export const Library: React.FC<LibraryProps> = ({
                         <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-400/10`} title={t.edit}>
                           <i className="fa-solid fa-pencil text-[10px]"></i>
                         </button>
-                        <label onClick={e => e.stopPropagation()} className={`${circleActionBtn} hover:text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-400/10 cursor-pointer`} title={t.importSubs}>
-                          <span className="text-[7px] font-black">SUB</span>
-                          <input type="file" accept={SUPPORTED_SUBTITLE_TYPES} className="hidden" onChange={(e) => handleSubFileChange(e, track.id, false)} />
-                        </label>
-                        <label onClick={e => e.stopPropagation()} className={`${circleActionBtn} hover:text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-400/10 cursor-pointer`} title={t.importTrans}>
-                          <span className="text-[7px] font-black">TR</span>
-                          <input type="file" accept={SUPPORTED_SUBTITLE_TYPES} className="hidden" onChange={(e) => handleSubFileChange(e, track.id, true)} />
-                        </label>
                     </div>
                  </div>
                </div>
-               <div className="w-full mt-3 text-center px-1">
-                 <h3 className="text-[11px] md:text-xs text-slate-500 dark:text-slate-400 font-bold leading-tight line-clamp-2 group-hover:text-slate-900 dark:group-hover:text-white transition-colors" title={track.title}>
-                   {track.title}
-                 </h3>
-               </div>
+               <h3 className="mt-3 text-xs md:text-sm font-bold text-slate-700 dark:text-slate-200 text-center truncate w-full px-2">{track.title}</h3>
             </div>
           ))}
         </div>
       ) : (
-        <div className="space-y-2 max-w-4xl mx-auto">
-          {filteredTracks.map(track => (
-            <div 
-              key={track.id} 
-              className="flex items-center gap-4 bg-white dark:bg-slate-800/40 hover:bg-gray-50 dark:hover:bg-slate-800/80 border border-gray-200 dark:border-slate-700/50 p-3 rounded-2xl transition-all cursor-pointer group relative shadow-sm"
-              onClick={() => onTrackSelect(track)}
-            >
-               <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-slate-900 overflow-hidden shrink-0 border border-gray-200 dark:border-slate-700 relative">
-                  {track.cover ? (
-                    <img src={track.cover} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-400 dark:text-slate-600">
-                       <i className={`fa-solid ${track.category === 'music' ? 'fa-music' : 'fa-book-open'} text-lg opacity-40`}></i>
-                    </div>
-                  )}
-                  <div className="absolute top-0 left-0">
-                      {!!track.file ? (
-                          <div className="w-3 h-3 bg-emerald-500 rounded-br flex items-center justify-center"><i className="fa-solid fa-file text-[6px] text-white"></i></div>
-                      ) : (
-                          <div className="w-3 h-3 bg-cyan-500 rounded-br flex items-center justify-center"><i className="fa-solid fa-globe text-[6px] text-white"></i></div>
-                      )}
-                  </div>
-               </div>
-               <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate group-hover:text-slate-900 dark:group-hover:text-white">{track.title}</h3>
-                  <div className="flex items-center gap-3 mt-1">
-                     <span className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                        <i className="fa-solid fa-file-audio"></i>
-                        {track.filename || "Stream"}
-                     </span>
-                     {track.subtitles && track.subtitles.length > 0 && <span className="text-[9px] font-black text-green-600 dark:text-green-500/80 uppercase tracking-tighter bg-green-100 dark:bg-green-500/10 px-1 rounded">SUB</span>}
-                     {track.secondarySubtitles && track.secondarySubtitles.length > 0 && <span className="text-[9px] font-black text-blue-600 dark:text-blue-500/80 uppercase tracking-tighter bg-blue-100 dark:bg-blue-500/10 px-1 rounded">TR</span>}
-                  </div>
-               </div>
-               <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={(e) => { e.stopPropagation(); onTrackDelete(track.id); }} className={`${circleActionBtn} hover:text-red-500`} title={t.delete}>
-                    <i className="fa-solid fa-trash-can text-[10px]"></i>
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className={`${circleActionBtn} hover:text-amber-500`} title={t.edit}>
-                    <i className="fa-solid fa-pencil text-[10px]"></i>
-                  </button>
-               </div>
-            </div>
-          ))}
+        <div className="flex flex-col gap-2">
+           {filteredTracks.map(track => (
+             <div key={track.id} onClick={() => onTrackSelect(track)} className="flex items-center gap-4 p-3 bg-white dark:bg-slate-800 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-700 cursor-pointer border border-gray-200 dark:border-slate-700 shadow-sm group animate-fade-in-up">
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0">
+                   {track.cover ? <img src={track.cover} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-gray-200 dark:bg-slate-700 flex items-center justify-center"><i className="fa-solid fa-music text-slate-400"></i></div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                   <h3 className="font-bold text-sm text-slate-800 dark:text-white truncate">{track.title}</h3>
+                   <div className="flex gap-2 text-[10px] text-slate-500 mt-1">
+                      <span>{track.file ? 'Local' : 'Net'}</span>
+                      {track.subtitles?.length ? <span className="text-green-500">SUB</span> : null}
+                   </div>
+                </div>
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); openEditModal(track); }} className="p-2 text-slate-400 hover:text-amber-500"><i className="fa-solid fa-pencil"></i></button>
+                    <button onClick={(e) => { e.stopPropagation(); onTrackDelete(track.id); }} className="p-2 text-slate-400 hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
+                </div>
+             </div>
+           ))}
         </div>
       )}
 
-      {filteredTracks.length === 0 && (
-         <div className="flex flex-col items-center justify-center py-32 text-slate-400 dark:text-slate-700 opacity-30">
-            <i className="fa-solid fa-layer-group text-6xl mb-6"></i>
-            <p className="text-sm font-black tracking-[0.2em] uppercase">{t.emptyLibrary}</p>
-         </div>
-      )}
-
-      {/* URL Import Modal */}
+      {/* Link Input Modal */}
       {showLinkInput && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xl p-4 transition-all animate-fade-in">
-           <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700/50 p-6 rounded-3xl shadow-2xl max-w-sm w-full animate-bounce-in transition-colors">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-100 dark:bg-indigo-600/20 flex items-center justify-center text-indigo-500 dark:text-indigo-400">
-                  <i className="fa-solid fa-globe"></i>
-                </div>
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.enterUrl}</h3>
-              </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+           <div className="bg-white dark:bg-slate-900 w-full max-w-md p-6 rounded-2xl shadow-2xl animate-bounce-in">
+              <h3 className="text-lg font-bold mb-4 text-slate-800 dark:text-white">{t.enterUrl}</h3>
               <input 
-                type="text" 
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
+                value={linkUrl} 
+                onChange={(e) => setLinkUrl(e.target.value)} 
+                className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 outline-none focus:ring-2 ring-indigo-500 dark:text-white mb-4"
                 placeholder={t.urlPlaceholder}
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-2xl p-4 text-slate-800 dark:text-white focus:border-indigo-500 outline-none mb-6 text-sm transition-all shadow-inner"
+                autoFocus
               />
-              <div className="flex gap-3">
-                <button onClick={() => setShowLinkInput(false)} className="flex-1 py-4 text-sm font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 transition-colors">{t.cancel}</button>
-                <button onClick={submitLink} className="flex-1 py-4 bg-indigo-600 rounded-2xl text-sm font-black text-white shadow-xl shadow-indigo-600/30 hover:bg-indigo-500 transition-all active:scale-95">{t.save}</button>
+              <div className="flex justify-end gap-2">
+                 <button onClick={() => setShowLinkInput(false)} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-white">{t.cancel}</button>
+                 <button onClick={submitLink} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">{t.confirm}</button>
               </div>
            </div>
         </div>
       )}
 
-      {/* Edit Item Modal */}
+      {/* Edit Modal */}
       {editingTrack && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xl p-4 transition-all animate-fade-in">
-           <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700/50 rounded-3xl shadow-2xl max-w-sm w-full animate-bounce-in max-h-[90vh] flex flex-col transition-colors overflow-hidden relative">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+           <div className="bg-white dark:bg-slate-900 w-full max-w-lg p-6 rounded-2xl shadow-2xl animate-bounce-in flex flex-col gap-4">
+              <div className="flex justify-between items-center border-b border-gray-200 dark:border-slate-700 pb-4">
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.editTrackInfo}</h3>
+                  <button onClick={() => setEditingTrack(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
               
-              {/* Header */}
-              <div className="flex items-center justify-between p-6 pb-2 shrink-0 bg-white dark:bg-slate-900 z-10">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-600/20 flex items-center justify-center text-amber-500 dark:text-amber-400">
-                      <i className="fa-solid fa-pencil"></i>
-                    </div>
-                    <h3 className="text-lg font-bold text-slate-800 dark:text-white">{t.editTrackInfo}</h3>
+              <div className="space-y-4">
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.displayName}</label>
+                      <input 
+                        value={editTitle} 
+                        onChange={(e) => setEditTitle(e.target.value)} 
+                        className="w-full p-2.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 outline-none focus:border-indigo-500 dark:text-white text-sm"
+                        placeholder={t.enterTitle}
+                      />
                   </div>
-                  <button onClick={() => setEditingTrack(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-2">
-                      <i className="fa-solid fa-xmark text-lg"></i>
-                  </button>
-              </div>
-              
-              {/* Content (Scrollable) */}
-              <div className="flex-1 overflow-y-auto no-scrollbar p-6 pt-2 space-y-6">
-                <div>
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">{t.coverImage}</label>
-                   <div className="flex gap-4 items-start">
-                      <div className="w-24 h-24 rounded-2xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
-                         {editingTrack.cover ? (
-                            <img src={editingTrack.cover} alt="Cover" className="w-full h-full object-cover" />
-                         ) : (
-                            <i className="fa-solid fa-image text-slate-400 dark:text-slate-600 text-2xl"></i>
-                         )}
-                      </div>
-                      <div className="flex-1 flex flex-col gap-2">
-                          <label className="flex-1 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
-                              <i className="fa-solid fa-upload"></i>
-                              {t.uploadReplaceCover}
-                              <input type="file" accept="image/*" className="hidden" onChange={handleCoverReplace} />
-                          </label>
-                          <button 
-                             onClick={handleDownloadCover} 
-                             disabled={!editingTrack.cover}
-                             className="flex-1 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                              <i className="fa-solid fa-download"></i>
-                              {t.downloadCover}
-                          </button>
-                      </div>
-                   </div>
-                </div>
 
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">{t.displayName}</label>
-                  <input 
-                    type="text" 
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder={editingTrack.filename?.replace(/\.[^/.]+$/, '') || t.enterTitle}
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-2xl p-4 text-slate-800 dark:text-white focus:border-amber-500 outline-none text-sm transition-all shadow-inner"
-                  />
-                </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.trackLanguage}</label>
+                      <select 
+                          value={editLang}
+                          onChange={(e) => setEditLang(e.target.value as LearningLanguage)}
+                          className="w-full p-2.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 outline-none focus:border-indigo-500 dark:text-white text-sm"
+                      >
+                          <option value="">{t.defaultLang}</option>
+                          <option value="en">{t.langEn}</option>
+                          <option value="zh">{t.langZh}</option>
+                          <option value="ja">{t.langJa}</option>
+                          <option value="es">{t.langEs}</option>
+                          <option value="ru">{t.langRu}</option>
+                          <option value="fr">{t.langFr}</option>
+                      </select>
+                  </div>
 
-                <div>
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5 px-1">{t.trackLanguage}</label>
-                   <select 
-                      value={editLang} 
-                      onChange={(e) => setEditLang(e.target.value as LearningLanguage | '')}
-                      className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-2xl p-3 text-slate-800 dark:text-white focus:border-amber-500 outline-none text-sm transition-all shadow-inner"
-                   >
-                      <option value="">{t.defaultLang}</option>
-                      <option value="en">{t.langEn}</option>
-                      <option value="zh">{t.langZh}</option>
-                      <option value="ja">{t.langJa}</option>
-                      <option value="es">{t.langEs}</option>
-                      <option value="ru">{t.langRu}</option>
-                      <option value="fr">{t.langFr}</option>
-                   </select>
-                </div>
-
-                <div className="pt-4 border-t border-gray-200 dark:border-slate-800">
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3 px-1">{t.audioSource}</label>
-                   
-                   {!!editingTrack.file ? (
-                       <div className="bg-gray-50 dark:bg-slate-800/50 rounded-2xl p-4 border border-gray-200 dark:border-slate-700/50">
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-3 break-all flex items-center gap-2">
-                            <i className="fa-solid fa-file-audio text-amber-500/50"></i>
-                            {editingTrack.filename || t.localFile}
-                          </p>
-                          <label className="w-full py-2.5 bg-gray-200 dark:bg-slate-700 hover:bg-gray-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95">
-                             <i className="fa-solid fa-rotate"></i>
-                             {t.reassociateFile}
-                             <input type="file" accept=".mp3,.m4b,.m4a,audio/*" className="hidden" onChange={handleFileReplace} />
-                          </label>
-                       </div>
-                   ) : (
-                        <div className="bg-gray-50 dark:bg-slate-800/50 rounded-2xl p-4 border border-gray-200 dark:border-slate-700/50">
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-3 break-all flex items-center gap-2">
-                            <i className="fa-solid fa-globe text-cyan-500/50"></i>
-                            {t.networkLink}
-                          </p>
+                  {!editingTrack.file && (
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.networkLink}</label>
                           <input 
-                            type="text" 
-                            value={editUrl}
-                            onChange={(e) => setEditUrl(e.target.value)}
-                            placeholder={t.urlPlaceholder}
-                            className="w-full bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-3 text-slate-800 dark:text-white focus:border-cyan-500 outline-none text-xs transition-all shadow-inner mb-2"
+                            value={editUrl} 
+                            onChange={(e) => setEditUrl(e.target.value)} 
+                            className="w-full p-2.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 outline-none focus:border-indigo-500 dark:text-white text-sm"
                           />
-                        </div>
-                   )}
-                </div>
+                      </div>
+                  )}
 
-                <div className="pt-2">
-                    <button 
-                       onClick={handleExport}
-                       className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
-                    >
-                       <i className="fa-solid fa-file-export"></i>
-                       {t.exportNotes}
-                    </button>
-                </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.fileAssociation}</label>
+                      <label className="flex items-center justify-center w-full p-3 border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-lg cursor-pointer hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-slate-800 transition-colors group">
+                          <span className="text-sm text-slate-500 group-hover:text-indigo-500"><i className="fa-solid fa-rotate mr-2"></i>{t.reassociateFile}</span>
+                          <input type="file" className="hidden" onChange={handleFileReplace} accept=".mp3,.m4b,.m4a,audio/*" />
+                      </label>
+                      <p className="text-[10px] text-slate-400 mt-1 truncate">{editingTrack.file ? editingTrack.file.name : t.unassociated}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.uploadSubs} (.srt/.lrc)</label>
+                          <label className="flex items-center justify-center w-full p-2 bg-gray-100 dark:bg-slate-800 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300">
+                              {t.importSubs}
+                              <input type="file" className="hidden" accept={SUPPORTED_SUBTITLE_TYPES} onChange={(e) => handleSubFileChange(e, editingTrack.id, false)} />
+                          </label>
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.importTrans} (.srt/.lrc)</label>
+                          <label className="flex items-center justify-center w-full p-2 bg-gray-100 dark:bg-slate-800 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300">
+                              {t.importTrans}
+                              <input type="file" className="hidden" accept={SUPPORTED_SUBTITLE_TYPES} onChange={(e) => handleSubFileChange(e, editingTrack.id, true)} />
+                          </label>
+                      </div>
+                  </div>
+
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">{t.coverImage}</label>
+                      <div className="flex gap-2">
+                          <label className="flex-1 flex items-center justify-center p-2 bg-gray-100 dark:bg-slate-800 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300">
+                              {t.uploadReplaceCover}
+                              <input type="file" className="hidden" accept="image/*" onChange={handleCoverReplace} />
+                          </label>
+                          {editingTrack.cover && (
+                              <button onClick={handleDownloadCover} className="px-3 bg-gray-100 dark:bg-slate-800 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                  <i className="fa-solid fa-download"></i>
+                              </button>
+                          )}
+                      </div>
+                  </div>
               </div>
 
-              {/* Footer (Fixed) */}
-              <div className="p-6 pt-4 border-t border-gray-200 dark:border-slate-700 shrink-0 bg-white dark:bg-slate-900 flex gap-3">
-                <button onClick={() => setEditingTrack(null)} className="flex-1 py-4 text-sm font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 transition-colors">{t.cancel}</button>
-                <button onClick={saveTrackEdit} className="flex-1 py-4 bg-amber-600 rounded-2xl text-sm font-black text-white shadow-xl shadow-amber-600/30 hover:bg-amber-500 transition-all active:scale-95">{t.save}</button>
+              <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+                 <button onClick={handleExport} className="mr-auto px-4 py-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg text-sm font-bold flex items-center gap-2">
+                    <i className="fa-brands fa-markdown"></i> {t.exportNotes}
+                 </button>
+                 <button onClick={() => setEditingTrack(null)} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-white">{t.cancel}</button>
+                 <button onClick={saveTrackEdit} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg">{t.save}</button>
               </div>
            </div>
         </div>
