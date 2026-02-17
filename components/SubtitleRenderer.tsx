@@ -145,13 +145,12 @@ const SubtitleItem = memo(({
 
   return (
     <div 
-      // Disabled onClick seeking here as requested. Use SubtitleListPanel or prev/next controls for explicit seeking.
       className={`group relative flex items-center justify-center py-1 md:py-1.5 px-6 rounded-2xl text-center transition-all duration-300 ${
         isActive 
           ? 'bg-white dark:bg-slate-800/60 text-slate-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 shadow-xl scale-100 opacity-100' 
           : 'text-slate-400 dark:text-slate-500 opacity-40 scale-95'
       }`} 
-      style={{ fontSize: isActive ? `${fontSize}px` : `${Math.max(12, fontSize * 0.85)}px`, willChange: 'transform, opacity' }}
+      style={{ fontSize: `${fontSize}px`, willChange: 'transform, opacity' }}
     >
         <div className="inline-block leading-relaxed tracking-wide w-full overflow-hidden break-words flex-1 min-w-0">{renderContent()}</div>
         {isActive && yomitanMode && onTranslateClick && (

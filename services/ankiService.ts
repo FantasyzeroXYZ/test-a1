@@ -65,6 +65,7 @@ export const addNote = async (
     sentence: string;
     translation: string;
     audioBase64?: string;
+    imageBase64?: string;
     examVocab?: string; // Added Exam Vocabulary data
   }
 ) => {
@@ -87,6 +88,17 @@ export const addNote = async (
       fields[settings.fieldMap.audio] = `[sound:${storedFilename}]`;
     } catch (err) {
       console.error("Failed to store media file, continuing without audio", err);
+    }
+  }
+
+  // Handle image
+  if (data.imageBase64 && settings.fieldMap.image) {
+    try {
+      const originalFilename = `linguaflow_image_${Date.now()}.jpg`;
+      const storedFilename = await storeMediaFile(settings, originalFilename, data.imageBase64);
+      fields[settings.fieldMap.image] = `<img src="${storedFilename}">`;
+    } catch (err) {
+      console.error("Failed to store image file, continuing without image", err);
     }
   }
 

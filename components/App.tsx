@@ -94,7 +94,7 @@ const App: React.FC = () => {
   });
   const [ankiSettings, setAnkiSettings] = useState<AnkiSettings>(() => {
     const stored = localStorage.getItem('lf_anki');
-    return stored ? JSON.parse(stored) : { host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic', fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '备注' }, tags: 'linguaflow' };
+    return stored ? JSON.parse(stored) : { host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic', fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '备注', image: 'Image' }, tags: 'linguaflow' };
   });
 
   const [view, setView] = useState<'library' | 'player'>('library');
@@ -197,11 +197,19 @@ const App: React.FC = () => {
   };
 
   const pauseForLookup = () => {
-      wasPlayingRef.current = isPlaying;
-      if (audioRef.current && !audioRef.current.paused) {
-          audioRef.current.pause();
-          setIsPlaying(false);
-      }
+    if (!audioRef.current) {
+        wasPlayingRef.current = false;
+        return;
+    }
+    
+    // Read the "playing" state directly from the audio element to avoid state sync issues.
+    const wasPlaying = !audioRef.current.paused;
+    wasPlayingRef.current = wasPlaying;
+
+    if (wasPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+    }
   };
 
   const resumeAfterLookup = () => {
@@ -347,7 +355,14 @@ const App: React.FC = () => {
         const termsToSearch = new Set<string>();
         const deinflections: DeinflectionResult[] = [];
         
-        termsToSearch.add(raw);
+        // For English, add both original case and lowercase
+        if (learningLang === 'en') {
+            termsToSearch.add(raw);
+            termsToSearch.add(raw.toLowerCase());
+        } else {
+            termsToSearch.add(raw);
+        }
+        
         let hiragana = '';
 
         if (learningLang === 'ja') {
@@ -369,7 +384,6 @@ const App: React.FC = () => {
                 });
             }
         } else if (learningLang === 'en') {
-            termsToSearch.add(raw.toLowerCase());
             if (settings.enablePreprocessing) {
                 const deinflectionResults = deinflector.deinflect(raw.toLowerCase(), 'en');
                 deinflections.push(...deinflectionResults);
@@ -404,12 +418,19 @@ const App: React.FC = () => {
                         }
                     }
                 } else if (learningLang === 'en') {
-                    if (res.word.toLowerCase() === raw.toLowerCase()) {
+                    if (res.word.toLowerCase() === raw.toLowerCase() || res.word === raw) {
                         foundWords.push({ result: res, source: 'direct' });
                     } else {
                         const match = deinflections.find(d => d.term === res.word);
                         if (match) {
-                           foundWords.push({ result: res, source: 'deinflected', reason: match.reasons.join(' ← ') });
+                           const newResult: DictionaryResult = {
+                               ...res,
+                               entries: res.entries.map(entry => ({
+                                   ...entry,
+                                   tags: [...new Set([...(entry.tags || []), ...match.tags])]
+                               }))
+                           };
+                           foundWords.push({ result: newResult, source: 'deinflected', reason: match.reasons.join(' ← ') });
                         }
                     }
                 } else { 
@@ -457,6 +478,18 @@ const App: React.FC = () => {
           isOpen: true,
           initialWord: word,
           initialSegmentIndex: index,
+          sentence: line.text,
+          contextLine: line,
+      });
+  };
+
+  const handleSentenceClick = (line: SubtitleLine) => {
+      if (settings.yomitanMode) return;
+      pauseForLookup();
+      setDictionaryModalState({
+          isOpen: true,
+          initialWord: line.text,
+          initialSegmentIndex: 0,
           sentence: line.text,
           contextLine: line,
       });
@@ -630,7 +663,29 @@ const App: React.FC = () => {
            <Library tracks={audioTracks} onTrackSelect={track => { setCurrentTrackId(track.id); setAudioSrc(track.url); setSubtitles(track.subtitles || []); setView('player'); setTimeout(safePlay, 100); }} language={settings.language} onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} onTrackUpdate={(id, up) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...up} : t)); updateTrackMetadataInDB(id, up); }} onImport={handleImport} onReplaceFile={()=>{}} onImportLink={()=>{}} onImportSubtitle={handleImportSubtitle} isImporting={isImporting} />
          ) : (
            <div className="flex-1 flex flex-col h-full relative">
-              <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} gameType="none" language={settings.language} learningLanguage={scope} fontSize={settings.subtitleFontSize} onWordClick={handleWordClick} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} />
+              <SubtitleRenderer 
+                  subtitles={subtitles} 
+                  activeSubtitleIndex={activeSubtitleIndex} 
+                  onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} 
+                  gameType="none" 
+                  language={settings.language} 
+                  learningLanguage={scope} 
+                  fontSize={settings.subtitleFontSize} 
+                  onWordClick={handleWordClick} 
+                  onSentenceClick={handleSentenceClick} 
+                  onTextHover={handleYomitanHover} 
+                  onTextClick={handleYomitanClick} 
+                  onTranslateClick={handleTranslateClick} 
+                  segmentationMode={settings.segmentationMode} 
+                  onAutoSegment={()=>{}} 
+                  isScanning={false} 
+                  onShiftTimeline={()=>{}} 
+                  subtitleMode={settings.subtitleMode} 
+                  dictMode={settings.dictMode}
+                  showSubtitles={true} 
+                  yomitanMode={settings.yomitanMode} 
+                  yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} 
+              />
               
               <SidePanel 
                   isOpen={showSidePanel} 

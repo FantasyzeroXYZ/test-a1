@@ -94,7 +94,7 @@ const App: React.FC = () => {
   });
   const [ankiSettings, setAnkiSettings] = useState<AnkiSettings>(() => {
     const stored = localStorage.getItem('lf_anki');
-    return stored ? JSON.parse(stored) : { host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic', fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '备注' }, tags: 'linguaflow' };
+    return stored ? JSON.parse(stored) : { host: '127.0.0.1', port: 8765, deckName: 'Default', modelName: 'Basic', fieldMap: { word: 'Front', definition: 'Back', sentence: '', translation: '', audio: '', examVocab: '备注', image: 'Image' }, tags: 'linguaflow' };
   });
 
   const [view, setView] = useState<'library' | 'player'>('library');
@@ -417,7 +417,14 @@ const App: React.FC = () => {
                     } else {
                         const match = deinflections.find(d => d.term === res.word);
                         if (match) {
-                           foundWords.push({ result: res, source: 'deinflected', reason: match.reasons.join(' ← ') });
+                           const newResult: DictionaryResult = {
+                               ...res,
+                               entries: res.entries.map(entry => ({
+                                   ...entry,
+                                   tags: [...new Set([...(entry.tags || []), ...match.tags])]
+                               }))
+                           };
+                           foundWords.push({ result: newResult, source: 'deinflected', reason: match.reasons.join(' ← ') });
                         }
                     }
                 } else { 
