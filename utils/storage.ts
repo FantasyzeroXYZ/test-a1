@@ -224,13 +224,13 @@ const processRawResults = (
     const term = filtered[0].term;
 
     const definitionEntries: LocalDictEntry[] = [];
-    const tags: string[] = [];
+    const globalTags: string[] = [];
     
     filtered.forEach(entry => {
         const dictMeta = dictMap.get(entry.dictionaryId);
         if (!dictMeta) return;
         if (dictMeta.type === 'tag') {
-            tags.push(...entry.definitions);
+            globalTags.push(...entry.definitions);
         } else {
             definitionEntries.push(entry);
         }
@@ -242,8 +242,8 @@ const processRawResults = (
         return pA - pB;
     });
     
-    if (definitionEntries.length === 0 && tags.length > 0) {
-        return { word: term, entries: [{ partOfSpeech: 'Tags', pronunciations: [], senses: [{ definition: 'No definition found.', examples: [], subsenses: [] }], tags: [...new Set(tags)] }] };
+    if (definitionEntries.length === 0 && globalTags.length > 0) {
+        return { word: term, entries: [{ partOfSpeech: 'Tags', pronunciations: [], senses: [{ definition: 'No definition found.', examples: [], subsenses: [] }], tags: [...new Set(globalTags)] }] };
     }
 
     return { 
@@ -251,7 +251,7 @@ const processRawResults = (
         entries: definitionEntries.map(item => ({
             partOfSpeech: dictMap.get(item.dictionaryId)?.name || 'Dictionary',
             pronunciations: item.reading ? [{ text: item.reading }] : [],
-            tags: [...new Set([...(item.tags || []), ...tags])],
+            tags: [...new Set(globalTags)], // ONLY use globalTags (from Tag Dictionaries). Ignore item.tags (from Def Dictionaries) for the tag display.
             senses: [{ definition: item.definitions.join('\n'), examples: [], subsenses: [] }]
         })) 
     };

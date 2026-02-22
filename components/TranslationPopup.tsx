@@ -10,6 +10,7 @@ interface TranslationPopupProps {
   initialEngine: WebSearchEngine;
   language: Language;
   onEngineChange: (engine: WebSearchEngine) => void;
+  onAddAnki?: () => void;
 }
 
 const getTargetLangCode = (appLang: Language) => {
@@ -30,7 +31,7 @@ const constructWebSearchUrl = (engine: WebSearchEngine, term: string, targetLang
 const translationEngines: WebSearchEngine[] = ['bing_trans', 'baidu_trans', 'sogou_trans'];
 
 export const TranslationPopup: React.FC<TranslationPopupProps> = ({ 
-    position, sentence, onClose, t, initialEngine, language, onEngineChange
+    position, sentence, onClose, t, initialEngine, language, onEngineChange, onAddAnki
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [currentEngine, setCurrentEngine] = useState<WebSearchEngine>(translationEngines.includes(initialEngine) ? initialEngine : 'bing_trans');
@@ -78,7 +79,14 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
                     <option value="sogou_trans">Sogou</option>
                 </select>
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><i className="fa-solid fa-times text-xs"></i></button>
+            <div className="flex items-center gap-2">
+                {onAddAnki && (
+                    <button onClick={onAddAnki} className="text-slate-400 hover:text-indigo-500 p-1" title={t.saveToAnki}>
+                        <i className="fa-solid fa-plus-circle text-xs"></i>
+                    </button>
+                )}
+                <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><i className="fa-solid fa-times text-xs"></i></button>
+            </div>
         </div>
         
         <div className="flex-1 bg-gray-100 dark:bg-black">

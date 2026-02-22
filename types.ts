@@ -93,6 +93,8 @@ export interface AnkiSettings {
   deckName: string;
   modelName: string;
   fieldMap: AnkiFieldMap;
+  sentenceDeckName?: string; // Added for Sentence Mode
+  sentenceModelName?: string; // Added for Sentence Mode
   sentenceFieldMap?: Partial<AnkiFieldMap>; // Added for Sentence Mode specific mapping
   tags: string;
 }

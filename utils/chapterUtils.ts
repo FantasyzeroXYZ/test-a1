@@ -148,6 +148,14 @@ const parseCoverFromBuffer = (cursor: AtomCursor): Blob | undefined => {
 
 export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], coverBlob?: Blob }> => {
     try {
+        // Limit parsing to files smaller than 100MB to prevent OOM on mobile
+        if (file.size > 100 * 1024 * 1024) {
+             console.warn("File too large for chapter parsing, skipping.");
+             return { 
+                chapters: [{ startTime: 0, title: file.name.replace(/\.[^/.]+$/, '') }] 
+            };
+        }
+
         const buffer = await file.arrayBuffer();
         const chapters = parseChaptersFromBuffer(new AtomCursor(buffer));
         const coverBlob = parseCoverFromBuffer(new AtomCursor(buffer));

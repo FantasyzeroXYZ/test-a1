@@ -57,6 +57,10 @@ const SubtitleItem = memo(({
   const segments = useMemo(() => {
     if (!line.text.trim()) return [];
     if (yomitanMode) {
+        // If English, we want word-based interaction, not character-based
+        if (learningLanguage === 'en') {
+             return line.text.split(/(\s+|[.,!?;:()])/).filter(Boolean);
+        }
         return Array.from(line.text as string); 
     }
     return segmentText(line.text as string, learningLanguage as string, segmentationMode as SegmentationMode);
@@ -89,7 +93,11 @@ const SubtitleItem = memo(({
     }
 
     let wordIndexCounter = 0;
+    let charOffset = 0;
     return segments.map((seg: string, idx: number) => {
+      const currentOffset = charOffset;
+      charOffset += seg.length;
+
       const isWordSegment = yomitanMode ? true : isWord(seg); 
       const currentWordIndex = isWordSegment ? wordIndexCounter++ : -1;
       const isHidden = gameType === 'cloze' && isActive && gameTargetLineId === line.id && gameHiddenWordIndex === currentWordIndex;
@@ -104,7 +112,28 @@ const SubtitleItem = memo(({
         if (prevSeg && isWord(prevSeg) && isWordSegment) spacing = 'mr-1';
       }
 
-      const isHighlighted = yomitanMode && yomitanHighlight && yomitanHighlight.lineId === line.id && idx >= yomitanHighlight.start && idx < yomitanHighlight.start + yomitanHighlight.length;
+      // Calculate highlight based on character index for English, or segment index for others?
+      // Yomitan highlight stores { start, length }. 
+      // If English, start is character index.
+      // If Japanese, start is character index (since segments are chars).
+      // So we need to check if current segment overlaps with highlight range.
+      
+      let isHighlighted = false;
+      if (yomitanMode && yomitanHighlight && yomitanHighlight.lineId === line.id) {
+          if (learningLanguage === 'en') {
+              // Check overlap
+              const segStart = currentOffset;
+              const segEnd = currentOffset + seg.length;
+              const hlStart = yomitanHighlight.start;
+              const hlEnd = yomitanHighlight.start + yomitanHighlight.length;
+              // Simple overlap check: start < end && end > start
+              isHighlighted = segStart < hlEnd && segEnd > hlStart;
+          } else {
+              // Japanese: segments are chars, so idx is char index
+              isHighlighted = idx >= yomitanHighlight.start && idx < yomitanHighlight.start + yomitanHighlight.length;
+          }
+      }
+
       const isPinned = isHighlighted && yomitanHighlight.pinned;
 
       let classes = `cursor-pointer transition-colors ${spacing} rounded-sm `;
@@ -126,12 +155,12 @@ const SubtitleItem = memo(({
         <span 
           key={idx} 
           onMouseEnter={(e) => {
-              if (showSubtitles && yomitanMode && onTextHover) onTextHover(e, seg, line, idx);
+              if (showSubtitles && yomitanMode && onTextHover) onTextHover(e, seg, line, learningLanguage === 'en' ? currentOffset : idx);
           }}
           onClick={(e) => { 
               e.stopPropagation(); 
               if (showSubtitles) {
-                  if (yomitanMode && onTextClick) onTextClick(e, seg, line, idx);
+                  if (yomitanMode && onTextClick) onTextClick(e, seg, line, learningLanguage === 'en' ? currentOffset : idx);
                   else if (!yomitanMode) onWordClick(seg, line, idx); 
               }
           }} 
@@ -145,21 +174,30 @@ const SubtitleItem = memo(({
 
   return (
     <div 
-      className={`group relative flex items-center justify-center py-1 md:py-1.5 px-6 rounded-2xl text-center transition-all duration-300 ${
+      className={`group relative flex items-center justify-center py-1 md:py-1.5 px-8 rounded-2xl text-center transition-all duration-300 ${
         isActive 
           ? 'bg-white dark:bg-slate-800/60 text-slate-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 shadow-xl scale-100 opacity-100' 
           : 'text-slate-400 dark:text-slate-500 opacity-40 scale-95'
       }`} 
       style={{ fontSize: `${fontSize}px`, willChange: 'transform, opacity' }}
     >
+        {yomitanMode && (
+            <button
+                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(line.text); }}
+                className="absolute left-1 top-1/2 -translate-y-1/2 p-1.5 text-slate-300 hover:text-indigo-500 transition-colors"
+                title="Copy"
+            >
+                <i className="fa-solid fa-copy text-xs"></i>
+            </button>
+        )}
         <div className="inline-block leading-relaxed tracking-wide w-full overflow-hidden break-words flex-1 min-w-0">{renderContent()}</div>
-        {isActive && yomitanMode && onTranslateClick && (
+        {yomitanMode && onTranslateClick && (
             <button
               onClick={(e) => { e.stopPropagation(); onTranslateClick(e, line); }}
-              className="ml-2 p-2 text-slate-400 hover:text-indigo-500 shrink-0"
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-slate-300 hover:text-indigo-500 transition-colors"
               title={t.sentenceTranslation}
             >
-              <i className="fa-solid fa-language text-sm"></i>
+              <i className="fa-solid fa-language text-xs"></i>
             </button>
         )}
     </div>

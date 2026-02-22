@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SUPPORTED_SUBTITLE_TYPES } from './constants';
-import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine, DictionaryResult, DictionaryEntry } from './types';
+import { SubtitleLine, Language, AudioTrack, Bookmark, SubtitleMode, ReaderSettings, GameType, AnkiSettings, LearningLanguage, SegmentationMode, PlaybackMode, WebSearchEngine, DictionaryResult, DictionaryEntry, SceneKeybindings } from './types';
 import { getTranslation } from './utils/i18n';
 import { parseChapters } from './utils/chapterUtils';
 import { parseSRT, parseLRC, parseVTT, parseASS, formatTime } from './utils/parsers';
@@ -26,6 +26,7 @@ import { normalizeCombiningCharacters, convertKatakanaToHiragana, isStringPartia
 import { japaneseDeinflectionRules } from './utils/japaneseDeinflectionRules';
 import { englishDeinflectionRules } from './utils/englishDeinflectionRules';
 import { extractAudioClip } from './utils/audioUtils';
+import { useGamepad } from './hooks/useGamepad';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   theme: 'light', language: 'zh', learningLanguage: 'en', subtitleMode: 'scroll', subtitleFontSize: 20, segmentationMode: 'browser',
@@ -189,7 +190,17 @@ const App: React.FC = () => {
 
   useEffect(() => { getAllTracksFromDB().then(setAudioTracks); }, []);
   const safePause = useCallback(() => { audioRef.current?.pause(); setIsPlaying(false); }, []);
-  const safePlay = useCallback(async () => { try { await audioRef.current?.play(); setIsPlaying(true); } catch (e) {} }, []);
+  const safePlay = useCallback(async () => { 
+      try { 
+          await audioRef.current?.play(); 
+          setIsPlaying(true); 
+      } catch (e: any) {
+          console.error("Playback failed", e);
+          if (e.name === 'NotAllowedError') {
+              showToast("Playback blocked. Please interact with the page first.", 'error');
+          }
+      } 
+  }, []);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
       setNotification({ message, type });
@@ -507,6 +518,46 @@ const App: React.FC = () => {
       });
   };
 
+  const handleAddSentenceCard = async (sentence: string) => {
+      try {
+          const currentTrack = audioTracks.find(t => t.id === currentTrackId);
+          let audioBase64: string | undefined = undefined;
+          
+          // Find the line corresponding to this sentence to extract audio
+          const line = subtitles.find(s => s.text === sentence);
+          if (line && currentTrack?.file && ankiSettings.fieldMap.audio) {
+              audioBase64 = await extractAudioClip(currentTrack.file, line.start, line.end);
+          }
+
+          // Use sentence field map if available, otherwise fallback to default
+          let map = { ...ankiSettings.fieldMap };
+          if (ankiSettings.sentenceFieldMap && Object.keys(ankiSettings.sentenceFieldMap).length > 0) {
+              map = { ...map, ...ankiSettings.sentenceFieldMap };
+          }
+          
+          await AnkiService.addNote({ 
+              ...ankiSettings, 
+              deckName: ankiSettings.sentenceDeckName || ankiSettings.deckName,
+              modelName: ankiSettings.sentenceModelName || ankiSettings.modelName,
+              fieldMap: map as any 
+          }, { 
+              word: sentence, // In sentence mode, the "word" is the sentence
+              definition: '', 
+              sentence: sentence, 
+              translation: '', 
+              audioBase64, 
+              examVocab: '' 
+          });
+          
+          showToast(t.ankiSuccess);
+      } catch (e) { 
+          console.error("Anki error:", e);
+          showToast(t.ankiError, 'error'); 
+      }
+      setTranslationPopup(null);
+      resumeAfterLookup();
+  };
+
   const handleAddCard = async (result: DictionaryResult, entry?: DictionaryEntry) => {
       const definition = entry ? formatSingleEntryForExport(result.word, entry) : formatDefinitionForExport(result);
       const word = result.word;
@@ -516,8 +567,23 @@ const App: React.FC = () => {
       entriesToScan.forEach(e => e.tags?.forEach(t => allTags.add(t)));
       
       const line = yomitanPopup?.highlight ? subtitles.find(s => s.id === yomitanPopup.highlight!.lineId) : null;
-      const sentence = line?.text || "";
-      const sent = settings.ankiBoldWord ? sentence.replace(word, `<b>${word}</b>`) : sentence;
+      let sent = line?.text || "";
+      
+      if (settings.ankiBoldWord && line && yomitanPopup?.highlight) {
+           const { start, length } = yomitanPopup.highlight;
+           // Ensure indices are within bounds
+           if (start >= 0 && start + length <= sent.length) {
+               const prefix = sent.substring(0, start);
+               const target = sent.substring(start, start + length);
+               const suffix = sent.substring(start + length);
+               sent = `${prefix}<b>${target}</b>${suffix}`;
+           } else {
+               // Fallback to replace if indices are off (e.g. deinflection mismatch)
+               sent = sent.replace(word, `<b>${word}</b>`);
+           }
+      } else if (settings.ankiBoldWord) {
+           sent = sent.replace(word, `<b>${word}</b>`);
+      }
 
       if (settings.dictExportMode === 'table') {
           const raw = localStorage.getItem('lf_vocab_table');
@@ -556,9 +622,27 @@ const App: React.FC = () => {
   
   const handleRewind = () => {
     if (!audioRef.current || subtitles.length === 0) return;
-    const current = audioRef.current.currentTime;
-    const target = subtitles.slice().reverse().find(s => s.start < current - 0.5);
-    const newTime = target ? target.start : 0;
+    
+    // Always go to the start of the previous subtitle if possible
+    let targetIndex = -1;
+    
+    if (activeSubtitleIndex > 0) {
+        targetIndex = activeSubtitleIndex - 1;
+    } else if (activeSubtitleIndex === 0) {
+        // If at first subtitle, just restart it
+        targetIndex = 0;
+    } else {
+        // If not in a subtitle, find the one before current time
+        const current = audioRef.current.currentTime;
+        const lastSubIndex = subtitles.findLastIndex(s => s.end <= current);
+        if (lastSubIndex !== -1) {
+            targetIndex = lastSubIndex;
+        } else {
+            targetIndex = 0;
+        }
+    }
+    
+    const newTime = subtitles[targetIndex].start;
     audioRef.current.currentTime = newTime;
     setCurrentTime(newTime);
   };
@@ -624,6 +708,79 @@ const App: React.FC = () => {
   useEffect(() => {
       if (audioRef.current) audioRef.current.playbackRate = playbackRate;
   }, [playbackRate, audioSrc]); 
+
+  const handleInput = useCallback((code: string, source: 'keyboard' | 'gamepad') => {
+      // Determine scene
+      let scene: keyof SceneKeybindings = 'library';
+      if (view === 'player') {
+          if (dictionaryModalState.isOpen || yomitanPopup?.visible || translationPopup?.visible) {
+              scene = 'dictionary';
+          } else {
+              scene = 'player';
+          }
+      }
+
+      const bindings = settings.keybindings[scene];
+      if (!bindings) return false;
+
+      const action = Object.entries(bindings).find(([_, boundCode]) => boundCode === code)?.[0];
+      if (!action) return false;
+
+      switch (action) {
+          case 'playPause': isPlaying ? safePause() : safePlay(); break;
+          case 'rewind': handleRewind(); break;
+          case 'forward': handleForward(); break;
+          case 'sidebar': setShowSidePanel(prev => !prev); break;
+          case 'dict': 
+              // Toggle dict or focus? For now just log or ignore
+              break;
+          case 'import': 
+              if (view === 'library') {
+                 // Trigger import logic if possible, or show help
+              }
+              break;
+          case 'settings': setShowSettings(prev => !prev); break;
+          case 'close': 
+              setDictionaryModalState(prev => ({...prev, isOpen: false}));
+              setYomitanPopup(null);
+              setTranslationPopup(null);
+              resumeAfterLookup();
+              break;
+          case 'addAnki':
+               // If in dictionary mode and something is open, add it
+               if (dictionaryModalState.isOpen) {
+                   // Trigger add anki in modal? 
+                   // We need a ref to the modal or expose a function
+               }
+               break;
+          case 'replay':
+               if (audioRef.current) audioRef.current.currentTime = subtitles[activeSubtitleIndex]?.start || 0;
+               break;
+      }
+      return true;
+  }, [view, dictionaryModalState.isOpen, yomitanPopup, translationPopup, settings.keybindings, isPlaying, safePause, safePlay, handleRewind, handleForward, subtitles, activeSubtitleIndex]);
+
+  useEffect(() => {
+      const onKeyDown = (e: KeyboardEvent) => {
+          if (settings.inputSource === 'keyboard') {
+              if (handleInput(e.code, 'keyboard')) {
+                  e.preventDefault();
+              }
+          }
+          if (e.code === 'Escape') {
+              if (showSettings) setShowSettings(false);
+              if (showVocabTable) setShowVocabTable(false);
+          }
+      };
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleInput, settings.inputSource, showSettings, showVocabTable]);
+
+  useGamepad((buttonIndex) => {
+      if (settings.inputSource === 'gamepad') {
+          handleInput(`Button${buttonIndex}`, 'gamepad');
+      }
+  });
 
   const ttsSettings = { enabled: settings.ttsEnabled, rate: settings.ttsRate, pitch: settings.ttsPitch, volume: settings.ttsVolume, voice: settings.ttsVoice };
 
@@ -754,6 +911,7 @@ const App: React.FC = () => {
                       initialEngine={settings.webSearchEngine}
                       language={settings.language}
                       onEngineChange={(engine) => setSettings({...settings, webSearchEngine: engine})}
+                      onAddAnki={() => handleAddSentenceCard(translationPopup.sentence)}
                   />
               )}
               <PlayerControls 
@@ -784,7 +942,7 @@ const App: React.FC = () => {
            </div>
          )}
       </div>
-      <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} language={settings.language} setLanguage={l=>setSettings({...settings, language:l})} learningLanguage={settings.learningLanguage} setLearningLanguage={l=>setSettings({...settings, learningLanguage:l})} readerSettings={settings} setReaderSettings={setSettings} ankiSettings={ankiSettings} setAnkiSettings={setAnkiSettings} subtitleMode={settings.subtitleMode} setSubtitleMode={m=>setSettings({...settings, subtitleMode:m})} subtitleFontSize={settings.subtitleFontSize} setSubtitleFontSize={s=>setSettings({...settings, subtitleFontSize:s})} segmentationMode={settings.segmentationMode} setSegmentationMode={m=>setSettings({...settings, segmentationMode:m})} webSearchEngine={settings.webSearchEngine} setWebSearchEngine={e=>setSettings({...settings, webSearchEngine:e})} />
+      <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} language={settings.language} setLanguage={l=>setSettings({...settings, language:l})} learningLanguage={settings.learningLanguage} setLearningLanguage={l=>setSettings({...settings, learningLanguage:l})} readerSettings={settings} setReaderSettings={setSettings} ankiSettings={ankiSettings} setAnkiSettings={setAnkiSettings} subtitleMode={settings.subtitleMode} setSubtitleMode={m=>setSettings({...settings, subtitleMode:m})} subtitleFontSize={settings.subtitleFontSize} setSubtitleFontSize={s=>setSettings({...settings, subtitleFontSize:s})} segmentationMode={settings.segmentationMode} setSegmentationMode={m=>setSettings({...settings, segmentationMode:m})} webSearchEngine={settings.webSearchEngine} setWebSearchEngine={e=>setSettings({...settings, webSearchEngine:e})} showToast={showToast} />
       <VocabListModal isOpen={showVocabTable} onClose={() => setShowVocabTable(false)} language={settings.language} onUpdate={() => {}} />
     </div>
   );

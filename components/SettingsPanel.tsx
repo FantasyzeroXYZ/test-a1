@@ -7,6 +7,7 @@ import { clearAllDataFromDB, saveDictionaryBatch, LocalDictEntry, DictionaryMeta
 import { DEFAULT_KEY_BINDINGS } from '../constants';
 import { downloadFile } from '../utils/parsers';
 import { deinflector, parseTransforms } from '../utils/deinflector';
+import { useGamepad } from '../hooks/useGamepad';
 
 // Add declaration for external JSZip library
 declare const JSZip: any;
@@ -30,13 +31,14 @@ interface SettingsPanelProps {
   setSegmentationMode: (mode: SegmentationMode) => void;
   webSearchEngine: WebSearchEngine;
   setWebSearchEngine: (engine: WebSearchEngine) => void;
+  showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
 type WebSearchCategory = 'search' | 'translate' | 'encyclopedia';
 type DictImportType = 'definition' | 'tag';
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
-  isOpen, onClose, language, setLanguage, learningLanguage, setLearningLanguage, subtitleMode, setSubtitleMode, subtitleFontSize, setSubtitleFontSize, readerSettings, setReaderSettings, ankiSettings, setAnkiSettings, segmentationMode, setSegmentationMode, webSearchEngine, setWebSearchEngine
+  isOpen, onClose, language, setLanguage, learningLanguage, setLearningLanguage, subtitleMode, setSubtitleMode, subtitleFontSize, setSubtitleFontSize, readerSettings, setReaderSettings, ankiSettings, setAnkiSettings, segmentationMode, setSegmentationMode, webSearchEngine, setWebSearchEngine, showToast
 }) => {
   const t = getTranslation(language);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set()); 
@@ -65,6 +67,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [dictImportType, setDictImportType] = useState<DictImportType>('definition');
   
   const [searchCategory, setSearchCategory] = useState<WebSearchCategory>('translate');
+
+  useGamepad((buttonIndex: number) => {
+      if (!isKeyBindingActive || !bindingKeyTarget) return;
+      const code = `Button${buttonIndex}`;
+      updateTempBinding(bindingKeyTarget, code);
+      setBindingKeyTarget(null);
+  });
 
   useEffect(() => {
     if (['google', 'baidu', 'bing'].includes(webSearchEngine)) setSearchCategory('search');
@@ -267,9 +276,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     const mode = item[1];
                     const metaData = item[2];
                     let tagValue = '';
-                    if (mode === 'freq' && metaData && metaData.frequency) { tagValue = metaData.frequency.displayValue || metaData.frequency.value; } 
-                    else if (typeof metaData === 'string') { tagValue = metaData; } 
-                    else if (typeof metaData === 'number') { tagValue = String(metaData); }
+                    if (mode === 'freq' && metaData && metaData.frequency) { 
+                        tagValue = metaData.frequency.displayValue || metaData.frequency.value; 
+                    } else if (typeof metaData === 'string') { 
+                        tagValue = metaData; 
+                    } else if (typeof metaData === 'number') { 
+                        tagValue = String(metaData); 
+                    } else if (metaData && typeof metaData === 'object') {
+                        // Fallback for other metadata types
+                        if (metaData.value) tagValue = String(metaData.value);
+                        else if (metaData.displayValue) tagValue = String(metaData.displayValue);
+                        else if (metaData.reading) tagValue = String(metaData.reading); // Pitch accent?
+                    }
+                    
                     if (tagValue) { entries.push({ term, definitions: [String(tagValue)], dictionaryId: dictionaryId }); }
                 }
                 totalCount++;
@@ -811,14 +830,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                {ankiConnected && (
                    <div className="pt-4 border-t border-gray-200 dark:border-slate-700 space-y-4 animate-fade-in">
                        <div>
-                           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiDeck}</label>
-                           <select value={ankiSettings.deckName} onChange={(e) => setAnkiSettings({...ankiSettings, deckName: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs">
+                           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{ankiConfigMode === 'word' ? t.ankiDeck : t.ankiDeckSentence}</label>
+                           <select 
+                               value={ankiConfigMode === 'word' ? ankiSettings.deckName : (ankiSettings.sentenceDeckName || ankiSettings.deckName)} 
+                               onChange={(e) => {
+                                   if (ankiConfigMode === 'word') setAnkiSettings({...ankiSettings, deckName: e.target.value});
+                                   else setAnkiSettings({...ankiSettings, sentenceDeckName: e.target.value});
+                               }} 
+                               className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs"
+                           >
                                {ankiDecks.map(d => <option key={d} value={d}>{d}</option>)}
                            </select>
                        </div>
                        <div>
-                           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiModel}</label>
-                           <select value={ankiSettings.modelName} onChange={(e) => setAnkiSettings({...ankiSettings, modelName: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs">
+                           <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{ankiConfigMode === 'word' ? t.ankiModel : t.ankiModelSentence}</label>
+                           <select 
+                               value={ankiConfigMode === 'word' ? ankiSettings.modelName : (ankiSettings.sentenceModelName || ankiSettings.modelName)} 
+                               onChange={(e) => {
+                                   if (ankiConfigMode === 'word') setAnkiSettings({...ankiSettings, modelName: e.target.value});
+                                   else setAnkiSettings({...ankiSettings, sentenceModelName: e.target.value});
+                               }} 
+                               className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs"
+                           >
                                {ankiModels.map(m => <option key={m} value={m}>{m}</option>)}
                            </select>
                        </div>
@@ -858,7 +891,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                ))}
                            </div>
                            <p className="text-[9px] text-slate-400 mt-2 italic">
-                               {ankiConfigMode === 'sentence' ? "Sentence Mode Fields: Sentence, Translation, Audio, Definition, Notes, Source." : "Word Mode Fields: Word, Definition, Sentence, Translation, Audio, Exam Vocab."}
+                               {ankiConfigMode === 'sentence' ? t.ankiModeSentenceDesc : t.ankiModeWordDesc}
                            </p>
                        </div>
                        
@@ -866,6 +899,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.ankiTags}</label>
                            <input type="text" value={ankiSettings.tags} onChange={(e) => setAnkiSettings({...ankiSettings, tags: e.target.value})} className="w-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-slate-800 dark:text-white p-2 rounded outline-none text-xs transition-colors" placeholder={t.tagsPlaceholder} />
                        </div>
+
+                       <button 
+                           onClick={() => { localStorage.setItem('lf_anki', JSON.stringify(ankiSettings)); showToast(t.saveSuccess || "Settings saved successfully."); }}
+                           className="w-full py-2 bg-green-600 hover:bg-green-500 text-white rounded font-bold text-xs shadow-md transition-all mt-2"
+                       >
+                           <i className="fa-solid fa-save mr-2"></i> {t.save || "Save Settings"}
+                       </button>
                    </div>
                )}
             </div>

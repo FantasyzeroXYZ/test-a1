@@ -65,7 +65,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   if (loopA !== null && loopB === null) abLabel = "A-";
   else if (loopA !== null && loopB !== null) abLabel = "A-B";
 
-  const controlBtnClass = "text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white p-2 rounded-full hover:bg-gray-200 dark:hover:bg-slate-700 transition-all active:scale-90 flex items-center justify-center";
+  const controlBtnClass = "text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white p-2 rounded-full md:hover:bg-gray-200 dark:md:hover:bg-slate-700 transition-all flex items-center justify-center";
 
   return (
     <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border-t border-gray-200 dark:border-slate-700 w-full sticky bottom-0 z-50 pt-2 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-2xl transition-colors duration-300">

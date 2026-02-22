@@ -197,6 +197,9 @@ export const YomitanPopup: React.FC<YomitanPopupProps> = ({
                                     <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                                         <h4 className="font-bold text-base text-slate-800 dark:text-white flex items-center gap-2">
                                             <span>{wordMatch.result.word}</span>
+                                            <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(wordMatch.result.word); }} className="text-slate-400 hover:text-indigo-500 text-xs transition-colors" title="Copy">
+                                                <i className="fa-solid fa-copy"></i>
+                                            </button>
                                             <button onClick={(e) => { e.stopPropagation(); handlePlayAudio(wordMatch); }} className="text-slate-400 hover:text-indigo-500 text-xs transition-colors">
                                                 <i className="fa-solid fa-volume-high"></i>
                                             </button>

@@ -705,7 +705,6 @@ const DictionaryModal: React.FC<Props> = ({
                 />
                 <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
                   <button onClick={handleAppendSegment} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white" title={t.appendSegment}><i className="fa-solid fa-plus"></i></button>
-                  <button onClick={handleCopyFullSentence} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white" title="全句查询"><i className="fa-solid fa-quote-right"></i></button>
                   <button onClick={() => handleSearch()} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white"><i className="fa-solid fa-magnifying-glass"></i></button>
                   <button 
                       onClick={() => handleAddToAnkiOrTable()} 
@@ -730,22 +729,53 @@ const DictionaryModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Word Bar - Always Visible */}
-        <div className="bg-gray-50 dark:bg-slate-800/30 border-b border-gray-200 dark:border-slate-700/50 p-3 flex gap-2 items-center shrink-0 transition-colors">
-          <div className={`flex-1 flex flex-wrap text-sm text-slate-600 dark:text-slate-300 ${isCJK ? 'gap-0' : 'gap-1'}`}>
-            {segments.map((seg, i) => {
-              const isHighlighted = i >= highlightRange.start && i <= highlightRange.end;
-              return (
-                  <span key={i} onClick={() => { setInputTerm(seg); setActiveSearchTerm(seg); setHighlightRange({start: i, end: i}); handleSearch(seg); if(settings.copyToClipboard) navigator.clipboard.writeText(seg); }} 
-                    className={`cursor-pointer hover:text-indigo-500 dark:hover:text-indigo-400 px-0 rounded ${isHighlighted ? 'text-indigo-600 dark:text-indigo-300 font-bold underline decoration-indigo-500/50' : ''}`}>
-                    {seg}
-                  </span>
-              );
-            })}
-          </div>
-          <button onClick={handleReplaySentence} className="p-2 text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 shrink-0" title={t.replaySentence}><i className="fa-solid fa-rotate-right"></i></button>
-        </div>
+        {/* Word Bar - Only Visible in Word Mode */}
+        {settings.dictMode === 'word' && (
+            <div className="bg-gray-50 dark:bg-slate-800/30 border-b border-gray-200 dark:border-slate-700/50 p-3 flex gap-2 items-center shrink-0 transition-colors">
+              <div className={`flex-1 flex flex-wrap text-sm text-slate-600 dark:text-slate-300 ${isCJK ? 'gap-0' : 'gap-1'}`}>
+                {segments.map((seg, i) => {
+                  const isHighlighted = i >= highlightRange.start && i <= highlightRange.end;
+                  return (
+                      <span key={i} onClick={() => { setInputTerm(seg); setActiveSearchTerm(seg); setHighlightRange({start: i, end: i}); handleSearch(seg); if(settings.copyToClipboard) navigator.clipboard.writeText(seg); }} 
+                        className={`cursor-pointer hover:text-indigo-500 dark:hover:text-indigo-400 px-0 rounded ${isHighlighted ? 'text-indigo-600 dark:text-indigo-300 font-bold underline decoration-indigo-500/50' : ''}`}>
+                        {seg}
+                      </span>
+                  );
+                })}
+              </div>
+              <button onClick={handleReplaySentence} className="p-2 text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 shrink-0" title={t.replaySentence}><i className="fa-solid fa-rotate-right"></i></button>
+            </div>
+        )}
 
+        {/* Sentence Bar - Only Visible in Sentence Mode */}
+        {settings.dictMode === 'sentence' && (
+            <div className="bg-gray-50 dark:bg-slate-800/30 border-b border-gray-200 dark:border-slate-700/50 p-3 flex gap-2 items-center shrink-0 transition-colors">
+              <div className={`flex-1 flex flex-wrap text-sm text-slate-600 dark:text-slate-300 ${isCJK ? 'gap-0' : 'gap-1'}`}>
+                {segmentText(sentence, effectiveLearningLang, segmentationMode).map((seg, i) => {
+                  return (
+                      <span key={i} onClick={() => { 
+                          // When clicking a segment in sentence mode, we switch to word mode for that segment?
+                          // Or just search that segment but stay in sentence mode?
+                          // User said: "Remember displaying sentence and clickable segments is the Sentence Bar"
+                          // And "Switching to sentence mode puts the whole sentence into search bar"
+                          // So clicking here should probably search the segment.
+                          setInputTerm(seg); 
+                          setActiveSearchTerm(seg); 
+                          // setHighlightRange({start: i, end: i}); // Highlight range might not match if segments are re-calculated
+                          handleSearch(seg); 
+                          if(settings.copyToClipboard) navigator.clipboard.writeText(seg); 
+                      }} 
+                        className={`cursor-pointer hover:text-indigo-500 dark:hover:text-indigo-400 px-0 rounded`}>
+                        {seg}
+                      </span>
+                  );
+                })}
+              </div>
+              <button onClick={handleReplaySentence} className="p-2 text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 shrink-0" title={t.replaySentence}><i className="fa-solid fa-rotate-right"></i></button>
+            </div>
+        )}
+
+        {settings.dictMode === 'word' && (
         <div className="p-2 border-b border-gray-200 dark:border-slate-700 flex flex-col bg-gray-50 dark:bg-slate-800/30 transition-colors shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 flex-wrap">
@@ -767,6 +797,7 @@ const DictionaryModal: React.FC<Props> = ({
             )}
           </div>
         </div>
+        )}
 
         <div className="flex justify-around border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/20 shrink-0 transition-colors">
           {(['dict', 'script', 'web', 'custom'] as const).map(tab => (
