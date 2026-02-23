@@ -25,6 +25,7 @@ interface YomitanPopupProps {
   t: { [key: string]: string };
   learningLanguage: LearningLanguage;
   ttsSettings: { enabled: boolean; rate: number; pitch: number; volume: number; voice: string };
+  loading?: boolean;
 }
 
 // Structured content renderer for JSON definitions
@@ -121,7 +122,7 @@ const WordDefinition: React.FC<{
 };
 
 export const YomitanPopup: React.FC<YomitanPopupProps> = ({ 
-    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t, learningLanguage, ttsSettings
+    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t, learningLanguage, ttsSettings, loading
 }) => {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -141,7 +142,16 @@ export const YomitanPopup: React.FC<YomitanPopupProps> = ({
     zIndex: 1000, 
   };
   
+  if (loading) {
+      return (
+        <div ref={ref} style={style} className="w-[320px] bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col items-center justify-center p-8 animate-fade-in">
+            <i className="fa-solid fa-circle-notch fa-spin text-2xl text-indigo-500"></i>
+        </div>
+      );
+  }
+
   const activeResult = results[activeSegmentIndex];
+  if (!activeResult) return null;
 
   const handlePlayAudio = (wordMatch: YomitanAnalysisResult['foundWords'][0]) => {
       if (!ttsSettings.enabled) return;

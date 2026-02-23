@@ -5,9 +5,9 @@ class AtomCursor {
     data: Uint8Array;
     pos: number;
 
-    constructor(buffer: ArrayBuffer) {
-        this.data = new Uint8Array(buffer);
-        this.pos = 0;
+    constructor(data: Uint8Array, pos: number = 0) {
+        this.data = data;
+        this.pos = pos;
     }
 
     readUInt32(): number {
@@ -28,7 +28,7 @@ class AtomCursor {
 
     readString(n: number): string {
         if (this.pos + n > this.data.length) return "";
-        const bytes = this.data.slice(this.pos, this.pos + n);
+        const bytes = this.data.subarray(this.pos, this.pos + n);
         this.pos += n;
         return new TextDecoder().decode(bytes);
     }
@@ -41,60 +41,70 @@ class AtomCursor {
     skip(n: number) {
         this.pos += n;
     }
-
-    hasMore(end: number = this.data.length): boolean {
-        return this.pos < end;
-    }
 }
 
 /**
  * 递归扫描特定类型的原子。
- * 限制在元数据相关容器内搜索，避免误入庞大的 'mdat'。
+ * 使用偏移量而非切片以提高性能并减少内存占用。
  */
-const recursiveFindAtom = (cursor: AtomCursor, target: string, end: number): {size: number, startPos: number} => {
+const findAtom = (data: Uint8Array, target: string, start: number, end: number): { size: number, contentStart: number } | null => {
     const containers = ['moov', 'udta', 'meta', 'ilst', 'trak', 'mdia', 'minf', 'stbl'];
-    while (cursor.pos < end - 8) {
-        const start = cursor.pos;
-        let size = cursor.readUInt32();
-        const type = cursor.readString(4);
+    let pos = start;
+    
+    while (pos < end - 8) {
+        const atomStart = pos;
+        const size = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]) >>> 0;
+        const type = String.fromCharCode(data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]);
         
+        if (size === 0) break;
+
         let headerSize = 8;
+        let actualSize = size;
+
         if (size === 1) {
-            const largeSize = cursor.readUInt64();
-            size = Number(largeSize);
+            let largeSize = 0n;
+            for (let i = 0; i < 8; i++) {
+                largeSize = (largeSize << 8n) | BigInt(data[pos + 8 + i]);
+            }
+            actualSize = Number(largeSize);
             headerSize = 16;
         }
 
-        const actualSize = size === 0 ? end - start : size;
-        const contentSize = actualSize - headerSize;
+        const contentStart = atomStart + headerSize;
+        const contentEnd = atomStart + actualSize;
 
         if (type === target) {
-            return { size: contentSize, startPos: cursor.pos };
+            return { size: actualSize - headerSize, contentStart };
         }
 
         if (containers.includes(type)) {
-            // meta 原子特殊处理：通常有一个 4 字节的 full atom 头部
-            const diveOffset = type === 'meta' ? 4 : 0;
-            const diveCursor = new AtomCursor(cursor.data.buffer.slice(cursor.pos + diveOffset, start + actualSize));
-            const result = recursiveFindAtom(diveCursor, target, diveCursor.data.length);
-            if (result.size > 0) {
-                return { size: result.size, startPos: cursor.pos + diveOffset + result.startPos };
+            let diveOffset = 0;
+            if (type === 'meta') {
+                // The 'meta' atom can be a Full Atom (skip 4 bytes) or a regular atom.
+                // Heuristic: check if the first 4 bytes of content look like a valid atom size.
+                if (contentStart + 4 <= contentEnd) {
+                    const firstInt = ((data[contentStart] << 24) | (data[contentStart + 1] << 16) | (data[contentStart + 2] << 8) | data[contentStart + 3]) >>> 0;
+                    if (firstInt > contentEnd - contentStart || firstInt < 8) {
+                        diveOffset = 4;
+                    }
+                }
             }
+            const result = findAtom(data, target, contentStart + diveOffset, contentEnd);
+            if (result) return result;
         }
 
-        if (actualSize <= 0) break;
-        cursor.pos = start + actualSize;
+        pos = contentEnd;
     }
-    return { size: 0, startPos: 0 };
+    return null;
 };
 
-const parseChaptersFromBuffer = (cursor: AtomCursor): Chapter[] => {
+const parseChaptersFromBuffer = (data: Uint8Array): Chapter[] => {
     const chapters: Chapter[] = [];
-    const result = recursiveFindAtom(cursor, 'chpl', cursor.data.length);
+    const result = findAtom(data, 'chpl', 0, data.length);
 
-    if (!result.size) return chapters;
+    if (!result) return chapters;
     
-    cursor.pos = result.startPos;
+    const cursor = new AtomCursor(data, result.contentStart);
     const version = cursor.readByte();
     cursor.skip(3); // Flags
     
@@ -107,11 +117,12 @@ const parseChaptersFromBuffer = (cursor: AtomCursor): Chapter[] => {
     }
     
     for (let i = 0; i < count; i++) {
-        if (cursor.pos + 9 > cursor.data.length) break;
+        if (cursor.pos + 9 > data.length) break;
         const timestamp = cursor.readUInt64(); 
         const titleLen = cursor.readByte();
-        if (cursor.pos + titleLen > cursor.data.length) break;
+        if (cursor.pos + titleLen > data.length) break;
         const title = cursor.readString(titleLen);
+        // Nero chapters use 100ns units
         const startTime = Number(timestamp) / 10000000; 
         chapters.push({
             startTime,
@@ -122,20 +133,20 @@ const parseChaptersFromBuffer = (cursor: AtomCursor): Chapter[] => {
     return chapters;
 };
 
-const parseCoverFromBuffer = (cursor: AtomCursor): Blob | undefined => {
-    const result = recursiveFindAtom(cursor, 'covr', cursor.data.length);
-    if (!result.size) return undefined;
+const parseCoverFromBuffer = (data: Uint8Array): Blob | undefined => {
+    const result = findAtom(data, 'covr', 0, data.length);
+    if (!result) return undefined;
 
-    cursor.pos = result.startPos;
     // 寻找内部的 'data' 原子
-    const dataRes = recursiveFindAtom(cursor, 'data', result.startPos + result.size);
-    if (!dataRes.size) return undefined;
+    const dataRes = findAtom(data, 'data', result.contentStart, result.contentStart + result.size);
+    if (!dataRes) return undefined;
 
-    cursor.pos = dataRes.startPos + 8; // 跳过 data atom 头部
+    // data atom 头部: 4 bytes type, 4 bytes locale
+    const imgDataStart = dataRes.contentStart + 8;
     const imgDataSize = dataRes.size - 8;
     if (imgDataSize <= 0) return undefined;
     
-    const imgBytes = cursor.data.slice(cursor.pos, cursor.pos + imgDataSize);
+    const imgBytes = data.subarray(imgDataStart, imgDataStart + imgDataSize);
     let mimeType = 'image/jpeg';
     if (imgBytes[0] === 0x89 && imgBytes[1] === 0x50) mimeType = 'image/png';
     
@@ -148,8 +159,8 @@ const parseCoverFromBuffer = (cursor: AtomCursor): Blob | undefined => {
 
 export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], coverBlob?: Blob }> => {
     try {
-        // Limit parsing to files smaller than 100MB to prevent OOM on mobile
-        if (file.size > 100 * 1024 * 1024) {
+        // Increase limit to 500MB as we are now more memory efficient
+        if (file.size > 500 * 1024 * 1024) {
              console.warn("File too large for chapter parsing, skipping.");
              return { 
                 chapters: [{ startTime: 0, title: file.name.replace(/\.[^/.]+$/, '') }] 
@@ -157,8 +168,9 @@ export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], 
         }
 
         const buffer = await file.arrayBuffer();
-        const chapters = parseChaptersFromBuffer(new AtomCursor(buffer));
-        const coverBlob = parseCoverFromBuffer(new AtomCursor(buffer));
+        const data = new Uint8Array(buffer);
+        const chapters = parseChaptersFromBuffer(data);
+        const coverBlob = parseCoverFromBuffer(data);
         
         const finalChapters = chapters.length > 0 ? chapters : [{
             startTime: 0,
@@ -167,6 +179,7 @@ export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], 
         
         return { chapters: finalChapters, coverBlob };
     } catch (err) {
+        console.error("Error parsing M4B metadata:", err);
         return { 
             chapters: [{ startTime: 0, title: file.name.replace(/\.[^/.]+$/, '') }] 
         };

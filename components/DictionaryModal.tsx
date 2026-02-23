@@ -243,7 +243,8 @@ const DictionaryModal: React.FC<Props> = ({
       }
     }
     // IMPORTANT: removed dictSource from dependencies to prevent reset on source switch
-  }, [isOpen, initialWord, initialSegmentIndex, sentence, settings.dictMode]);
+    // Also removed settings.dictMode to prevent reset when toggling mode via button
+  }, [isOpen, initialWord, initialSegmentIndex, sentence]);
 
   const fetchDefinition = async (term: string, source: 'api' | 'local') => {
     if (!term) return;

@@ -796,6 +796,13 @@ const App: React.FC = () => {
       <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-800 border-b h-16 shrink-0 z-50">
          <div className="flex items-center gap-4">
             <button onClick={() => { safePause(); setView('library'); }} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center transition-colors"><i className="fa-solid fa-chevron-left text-sm"></i></button>
+            {view === 'player' && audioTracks.find(t => t.id === currentTrackId)?.cover && (
+                <img 
+                   src={audioTracks.find(t => t.id === currentTrackId)?.cover} 
+                   className="w-10 h-10 rounded-lg object-cover shadow-sm border border-gray-200 dark:border-slate-700" 
+                   alt="" 
+                />
+            )}
             <h1 className="font-bold text-sm truncate max-w-[150px]">{view === 'player' ? audioTracks.find(t=>t.id===currentTrackId)?.title : t.appTitle}</h1>
          </div>
          <div className="flex items-center gap-2">
