@@ -60,13 +60,19 @@ export const initDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const saveTrackToDB = async (track: AudioTrack, file: File) => {
+export const saveTrackToDB = async (track: AudioTrack, file?: File) => {
   const db = await initDB();
   return new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     const { url, cover, ...trackData } = track;
-    const request = store.put({ ...trackData, file, updatedAt: Date.now() });
+    
+    // If file exists, we don't save the blob URL. If it doesn't (external link), we save the URL.
+    const dataToSave = file 
+        ? { ...trackData, file, updatedAt: Date.now() }
+        : { ...trackData, url, updatedAt: Date.now() };
+
+    const request = store.put(dataToSave);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -91,9 +97,10 @@ export const getAllTracksFromDB = async (): Promise<AudioTrack[]> => {
     const request = store.getAll();
     request.onsuccess = () => {
       const results = request.result.map(item => {
-        const file = item.file as File;
+        const file = item.file as File | undefined;
         const coverBlob = item.coverBlob as Blob | undefined;
-        let audioUrl = "";
+        let audioUrl = item.url || ""; // Default to stored URL (for external links)
+        
         if (file) {
             const name = file.name.toLowerCase();
             if (name.endsWith('.m4b') || name.endsWith('.m4a')) {

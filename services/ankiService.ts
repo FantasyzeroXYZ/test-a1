@@ -61,6 +61,7 @@ export const addNote = async (
   settings: AnkiSettings, 
   data: {
     word: string;
+    reading?: string;
     definition: string;
     sentence: string;
     translation: string;
@@ -73,6 +74,7 @@ export const addNote = async (
   
   // Map our data to the user's selected fields
   if (settings.fieldMap.word) fields[settings.fieldMap.word] = data.word;
+  if (settings.fieldMap.reading && data.reading) fields[settings.fieldMap.reading] = data.reading;
   if (settings.fieldMap.definition) fields[settings.fieldMap.definition] = data.definition;
   if (settings.fieldMap.sentence) fields[settings.fieldMap.sentence] = data.sentence;
   if (settings.fieldMap.translation) fields[settings.fieldMap.translation] = data.translation;

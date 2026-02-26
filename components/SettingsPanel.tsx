@@ -102,12 +102,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, [isOpen, readerSettings.keybindings]);
 
   useEffect(() => {
-      if (ankiConnected && ankiSettings.modelName) {
-          AnkiService.getModelFieldNames(ankiSettings, ankiSettings.modelName)
+      const targetModel = ankiConfigMode === 'word' ? ankiSettings.modelName : ankiSettings.sentenceModelName;
+      if (ankiConnected && targetModel) {
+          AnkiService.getModelFieldNames(ankiSettings, targetModel)
             .then(fields => setAnkiFields(fields))
             .catch(() => setAnkiFields([]));
       }
-  }, [ankiSettings.modelName, ankiConnected]);
+  }, [ankiSettings.modelName, ankiSettings.sentenceModelName, ankiConfigMode, ankiConnected]);
 
   const refreshDictionaries = async () => {
       const dicts = await getDictionaries();
@@ -412,7 +413,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const currentAnkiFieldMap = ankiConfigMode === 'word' ? ankiSettings.fieldMap : (ankiSettings.sentenceFieldMap as any || {});
-  const availableFields = ankiConfigMode === 'word' ? ['word', 'definition', 'sentence', 'translation', 'audio', 'examVocab'] : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; 
+  const availableFields = ankiConfigMode === 'word' ? ['word', 'reading', 'definition', 'sentence', 'translation', 'audio', 'examVocab'] : ['sentence', 'translation', 'audio', 'definition', 'notes', 'source']; 
   const updateAnkiField = (fieldType: string, value: string) => {
       if (ankiConfigMode === 'word') { setAnkiSettings({ ...ankiSettings, fieldMap: { ...ankiSettings.fieldMap, [fieldType]: value } }); } 
       else { setAnkiSettings({ ...ankiSettings, sentenceFieldMap: { ...ankiSettings.sentenceFieldMap, [fieldType]: value } }); }

@@ -88,6 +88,8 @@ const formatSingleEntryForExport = (word: string, entry: DictionaryEntry): strin
     return text.trim();
 };
 
+import Hls from 'hls.js';
+
 const App: React.FC = () => {
   const [settings, setSettings] = useState<ReaderSettings>(() => {
     const stored = localStorage.getItem('lf_settings_v5');
@@ -188,8 +190,25 @@ const App: React.FC = () => {
       return track?.language || settings.learningLanguage;
   }, [audioTracks, currentTrackId, settings.learningLanguage]);
 
+  const [pendingStartTime, setPendingStartTime] = useState<number | null>(null);
+
   useEffect(() => { getAllTracksFromDB().then(setAudioTracks); }, []);
-  const safePause = useCallback(() => { audioRef.current?.pause(); setIsPlaying(false); }, []);
+  const safePause = useCallback(() => { 
+      audioRef.current?.pause(); 
+      setIsPlaying(false); 
+  }, []);
+
+  const handleBackToLibrary = useCallback(() => {
+      safePause();
+      if (currentTrackId && audioRef.current) {
+          const time = audioRef.current.currentTime;
+          updateTrackMetadataInDB(currentTrackId, { currentTime: time });
+          setAudioTracks(prev => prev.map(t => t.id === currentTrackId ? { ...t, currentTime: time } : t));
+      }
+      setView('library');
+      setPendingStartTime(null);
+  }, [currentTrackId, safePause]);
+
   const safePlay = useCallback(async () => { 
       try { 
           await audioRef.current?.play(); 
@@ -201,6 +220,52 @@ const App: React.FC = () => {
           }
       } 
   }, []);
+
+  // HLS Support
+  useEffect(() => {
+      const audio = audioRef.current;
+      if (!audio || !audioSrc) return;
+
+      let hls: Hls | null = null;
+
+      if (audioSrc.includes('.m3u8') || (audioSrc.startsWith('blob:') === false && audioSrc.includes('m3u8'))) {
+          if (Hls.isSupported()) {
+              hls = new Hls();
+              hls.loadSource(audioSrc);
+              hls.attachMedia(audio);
+              hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                  if (pendingStartTime !== null) {
+                      audio.currentTime = pendingStartTime;
+                  }
+                  // Optional: auto play
+                  // safePlay();
+              });
+          } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+              audio.src = audioSrc;
+              // Native HLS support (Safari)
+          }
+      } else {
+          // Normal playback
+          // If previously HLS was attached, we might need cleanup, but React handles src change usually.
+          // However, hls.js recommends detaching.
+      }
+
+      return () => {
+          if (hls) {
+              hls.destroy();
+          }
+      };
+  }, [audioSrc]);
+
+  // Handle pending start time when metadata loaded
+  const onLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+      setDuration(e.currentTarget.duration);
+      if (pendingStartTime !== null) {
+          e.currentTarget.currentTime = pendingStartTime;
+          setCurrentTime(pendingStartTime);
+          setPendingStartTime(null);
+      }
+  };
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
       setNotification({ message, type });
@@ -270,6 +335,29 @@ const App: React.FC = () => {
         setTimeout(() => setIsImporting(false), 500);
         e.target.value = ''; 
     }
+  };
+
+  const handleImportLink = async (url: string, category: 'music' | 'audiobook') => {
+      try {
+          const id = crypto.randomUUID();
+          const title = url.split('/').pop()?.split('?')[0] || 'Unknown Stream';
+          
+          const newTrack: AudioTrack = { 
+              id, 
+              title, 
+              url, 
+              category, 
+              chapters: [], 
+              updatedAt: Date.now() 
+          };
+          
+          await saveTrackToDB(newTrack);
+          setAudioTracks(prev => [...prev, newTrack]);
+          showToast(t.importSuccess);
+      } catch (err) {
+          console.error(err);
+          showToast(t.importFailed, 'error');
+      }
   };
 
   const handleImportSubtitle = async (trackId: string, file: File, isSecondary: boolean) => {
@@ -561,6 +649,7 @@ const App: React.FC = () => {
   const handleAddCard = async (result: DictionaryResult, entry?: DictionaryEntry) => {
       const definition = entry ? formatSingleEntryForExport(result.word, entry) : formatDefinitionForExport(result);
       const word = result.word;
+      const reading = entry?.pronunciations?.[0]?.text || result.entries[0]?.pronunciations?.[0]?.text || '';
       const allTags = new Set<string>();
       
       const entriesToScan = entry ? [entry] : result.entries;
@@ -603,7 +692,7 @@ const App: React.FC = () => {
               let map = { ...ankiSettings.fieldMap };
               if (settings.dictMode === 'sentence' && ankiSettings.sentenceFieldMap) map = { ...map, ...ankiSettings.sentenceFieldMap };
               
-              await AnkiService.addNote({ ...ankiSettings, fieldMap: map as any }, { word, definition, sentence: sent, translation: '', audioBase64, examVocab: Array.from(allTags).join(' ') });
+              await AnkiService.addNote({ ...ankiSettings, fieldMap: map as any }, { word, reading, definition, sentence: sent, translation: '', audioBase64, examVocab: Array.from(allTags).join(' ') });
               
               showToast(t.ankiSuccess);
           } catch (e) { 
@@ -790,12 +879,12 @@ const App: React.FC = () => {
         ref={audioRef} 
         src={audioSrc || undefined} 
         onTimeUpdate={handleTimeUpdate} 
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} 
+        onLoadedMetadata={onLoadedMetadata} 
         className="hidden" 
       />
       <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-800 border-b h-16 shrink-0 z-50">
          <div className="flex items-center gap-4">
-            <button onClick={() => { safePause(); setView('library'); }} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center transition-colors"><i className="fa-solid fa-chevron-left text-sm"></i></button>
+            <button onClick={handleBackToLibrary} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center transition-colors"><i className="fa-solid fa-chevron-left text-sm"></i></button>
             {view === 'player' && audioTracks.find(t => t.id === currentTrackId)?.cover && (
                 <img 
                    src={audioTracks.find(t => t.id === currentTrackId)?.cover} 
@@ -818,7 +907,19 @@ const App: React.FC = () => {
       </header>
       <div className="flex-1 overflow-hidden relative">
          {view === 'library' ? (
-           <Library tracks={audioTracks} onTrackSelect={track => { setCurrentTrackId(track.id); setAudioSrc(track.url); setSubtitles(track.subtitles || []); setView('player'); setTimeout(safePlay, 100); }} language={settings.language} onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} onTrackUpdate={(id, up) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...up} : t)); updateTrackMetadataInDB(id, up); }} onImport={handleImport} onReplaceFile={()=>{}} onImportLink={()=>{}} onImportSubtitle={handleImportSubtitle} isImporting={isImporting} />
+           <Library tracks={audioTracks} onTrackSelect={track => { 
+               setCurrentTrackId(track.id); 
+               setAudioSrc(track.url); 
+               setSubtitles(track.subtitles || []); 
+               
+               // Use pendingStartTime to ensure it's set after metadata loads
+               const t = track.currentTime || 0; 
+               setPendingStartTime(t);
+               setCurrentTime(t); 
+               
+               setView('player'); 
+               setTimeout(safePlay, 100); 
+           }} language={settings.language} onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} onTrackUpdate={(id, up) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...up} : t)); updateTrackMetadataInDB(id, up); }} onImport={handleImport} onReplaceFile={()=>{}} onImportLink={handleImportLink} onImportSubtitle={handleImportSubtitle} isImporting={isImporting} />
          ) : (
            <div className="flex-1 flex flex-col h-full relative">
               <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} gameType="none" language={settings.language} learningLanguage={scope} fontSize={settings.subtitleFontSize} onWordClick={handleWordClick} onSentenceClick={handleSentenceClick} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} dictMode={settings.dictMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} />

@@ -157,6 +157,91 @@ const parseCoverFromBuffer = (data: Uint8Array): Blob | undefined => {
     }
 };
 
+const readSynchsafeInteger = (data: Uint8Array, offset: number): number => {
+    return ((data[offset] & 0x7f) << 21) |
+           ((data[offset + 1] & 0x7f) << 14) |
+           ((data[offset + 2] & 0x7f) << 7) |
+           (data[offset + 3] & 0x7f);
+};
+
+const parseID3v2Cover = (data: Uint8Array): Blob | undefined => {
+    if (data.length < 10 || String.fromCharCode(data[0], data[1], data[2]) !== 'ID3') return undefined;
+
+    const version = data[3];
+    const flags = data[5];
+    const size = readSynchsafeInteger(data, 6);
+    const headerSize = 10;
+    
+    let pos = headerSize;
+    const end = headerSize + size;
+
+    // Extended header check
+    if (flags & 0x40) {
+        const extHeaderSize = readSynchsafeInteger(data, pos);
+        pos += extHeaderSize;
+    }
+
+    while (pos < end) {
+        let frameId = '';
+        let frameSize = 0;
+        let frameHeaderSize = 0;
+
+        if (version === 2) {
+            frameId = String.fromCharCode(data[pos], data[pos+1], data[pos+2]);
+            frameSize = (data[pos+3] << 16) | (data[pos+4] << 8) | data[pos+5];
+            frameHeaderSize = 6;
+        } else if (version === 3) {
+            frameId = String.fromCharCode(data[pos], data[pos+1], data[pos+2], data[pos+3]);
+            frameSize = (data[pos+4] << 24) | (data[pos+5] << 16) | (data[pos+6] << 8) | data[pos+7];
+            frameHeaderSize = 10;
+        } else if (version === 4) {
+            frameId = String.fromCharCode(data[pos], data[pos+1], data[pos+2], data[pos+3]);
+            frameSize = readSynchsafeInteger(data, pos + 4);
+            frameHeaderSize = 10;
+        }
+
+        if (frameId === '' || frameSize === 0) break;
+
+        if (frameId === 'APIC' || frameId === 'PIC') {
+            const frameDataStart = pos + frameHeaderSize;
+            let mimeType = 'image/jpeg';
+            let picDataOffset = 0;
+
+            if (version === 2) {
+                const encoding = data[frameDataStart];
+                const format = String.fromCharCode(data[frameDataStart+1], data[frameDataStart+2], data[frameDataStart+3]);
+                mimeType = format === 'JPG' ? 'image/jpeg' : 'image/png';
+                picDataOffset = 5; // encoding(1) + format(3) + type(1)
+                // Description is skipped for simplicity (assuming empty or short)
+            } else {
+                const encoding = data[frameDataStart];
+                let mimeEnd = frameDataStart + 1;
+                while (data[mimeEnd] !== 0 && mimeEnd < frameDataStart + frameSize) mimeEnd++;
+                mimeType = new TextDecoder().decode(data.subarray(frameDataStart + 1, mimeEnd));
+                
+                const type = data[mimeEnd + 1];
+                let descEnd = mimeEnd + 2;
+                
+                // Skip description
+                if (encoding === 0 || encoding === 3) { // ISO-8859-1 or UTF-8 (terminated by 00)
+                     while (data[descEnd] !== 0 && descEnd < frameDataStart + frameSize) descEnd++;
+                     descEnd++; // skip null
+                } else { // UTF-16 (terminated by 00 00)
+                     while (!(data[descEnd] === 0 && data[descEnd+1] === 0) && descEnd < frameDataStart + frameSize) descEnd += 2;
+                     descEnd += 2; // skip nulls
+                }
+                picDataOffset = descEnd - frameDataStart;
+            }
+
+            const imgData = data.subarray(frameDataStart + picDataOffset, frameDataStart + frameSize);
+            return new Blob([imgData], { type: mimeType });
+        }
+
+        pos += frameHeaderSize + frameSize;
+    }
+    return undefined;
+};
+
 export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], coverBlob?: Blob }> => {
     try {
         // Increase limit to 500MB as we are now more memory efficient
@@ -169,6 +254,16 @@ export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], 
 
         const buffer = await file.arrayBuffer();
         const data = new Uint8Array(buffer);
+        
+        // Check for ID3v2 (MP3)
+        if (file.name.toLowerCase().endsWith('.mp3')) {
+             const coverBlob = parseID3v2Cover(data);
+             return { 
+                chapters: [{ startTime: 0, title: file.name.replace(/\.[^/.]+$/, '') }],
+                coverBlob 
+             };
+        }
+
         const chapters = parseChaptersFromBuffer(data);
         const coverBlob = parseCoverFromBuffer(data);
         
@@ -179,7 +274,7 @@ export const parseChapters = async (file: File): Promise<{ chapters: Chapter[], 
         
         return { chapters: finalChapters, coverBlob };
     } catch (err) {
-        console.error("Error parsing M4B metadata:", err);
+        console.error("Error parsing metadata:", err);
         return { 
             chapters: [{ startTime: 0, title: file.name.replace(/\.[^/.]+$/, '') }] 
         };

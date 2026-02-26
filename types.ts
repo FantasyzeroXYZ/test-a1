@@ -73,10 +73,12 @@ export interface AudioTrack {
   duration?: number;
   updatedAt?: number;
   language?: LearningLanguage; // Track specific language
+  currentTime?: number; // Added for playback progress persistence
 }
 
 export interface AnkiFieldMap {
   word: string;
+  reading?: string; // Added for reading/pronunciation
   definition: string;
   sentence: string;
   translation: string;
