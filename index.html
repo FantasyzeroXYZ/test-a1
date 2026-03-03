@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="supported-color-schemes" content="light dark">
+    <title>LinguaFlow Player</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+      }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tiny-segmenter/0.2.0/tiny-segmenter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+      html {
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        /* Via Browser Fix: Use min-height 100dvh and flex column */
+        min-height: 100dvh;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden; 
+        background-color: #f9fafb; /* Explicit background */
+        -webkit-user-select: none;
+        user-select: none;
+        overscroll-behavior: none;
+      }
+      .dark body {
+        background-color: #0f172a;
+      }
+      
+      /* Via Browser & Mobile Viewport Fixes */
+      #root {
+        position: relative; 
+        z-index: 10; /* Ensure it sits above browser UI glitches */
+        flex: 1; /* Take up remaining space */
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        background-color: inherit; /* Match body */
+        max-height: none !important;
+        overflow: hidden;
+      }
+
+      /* Custom Scrollbar for Webkit */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #4b5563;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #6b7280;
+      }
+      .lyric-active {
+        transform: scale(1.05);
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+      }
+      #dictionary-panel {
+        max-height: 85vh;
+      }
+      @keyframes bounce-in {
+        0% { transform: scale(0.9); opacity: 0; }
+        70% { transform: scale(1.03); opacity: 1; }
+        100% { transform: scale(1); }
+      }
+      .animate-bounce-in {
+        animation: bounce-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+    </style>
+
+<link rel="stylesheet" href="/index.css">
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/test-a1/assets/index-B45nD_3A.js"></script>
+</head>
+  <body class="bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-white overflow-hidden">
+    <div id="root"></div>
+</body>
+</html>
