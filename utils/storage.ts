@@ -324,17 +324,57 @@ export const searchLocalDictionary = async (term: string, currentScope: string):
 };
 
 export const batchSearchTerms = async (terms: string[], currentScope: string): Promise<DictionaryResult[]> => {
-    const termResults = await Promise.all(terms.map(term => searchLocalDictionaryByTerm(term, currentScope)));
-    const readingResults = await Promise.all(terms.map(term => searchLocalDictionaryByReading(term, currentScope)));
+    const db = await initDB();
+    const dictionaries = await getDictionaries();
+    if (dictionaries.length === 0) return [];
 
-    const allResults = [...termResults, ...readingResults].filter((r): r is DictionaryResult => r !== null);
+    const uniqueTerms = Array.from(new Set(terms));
     
-    const uniqueResults = new Map<string, DictionaryResult>();
-    allResults.forEach(res => {
-        if (!uniqueResults.has(res.word)) {
-            uniqueResults.set(res.word, res);
-        }
+    const results: LocalDictEntry[] = [];
+    
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(DICT_STORE_NAME, 'readonly');
+        const store = transaction.objectStore(DICT_STORE_NAME);
+        const termIndex = store.index('term');
+        const readingIndex = store.index('reading');
+        
+        let completed = 0;
+        const total = uniqueTerms.length * 2;
+        
+        const checkDone = () => {
+            completed++;
+            if (completed === total) {
+                const processedResults: DictionaryResult[] = [];
+                const groupedByTerm = new Map<string, LocalDictEntry[]>();
+                
+                results.forEach(res => {
+                    if (!groupedByTerm.has(res.term)) groupedByTerm.set(res.term, []);
+                    groupedByTerm.get(res.term)!.push(res);
+                });
+                
+                groupedByTerm.forEach((entries, term) => {
+                    const processed = processRawResults(entries, dictionaries, currentScope);
+                    if (processed) processedResults.push(processed);
+                });
+                
+                resolve(processedResults);
+            }
+        };
+
+        uniqueTerms.forEach(term => {
+            const termReq = termIndex.getAll(IDBKeyRange.only(term));
+            termReq.onsuccess = () => {
+                if (termReq.result) results.push(...termReq.result);
+                checkDone();
+            };
+            termReq.onerror = () => checkDone();
+
+            const readingReq = readingIndex.getAll(IDBKeyRange.only(term));
+            readingReq.onsuccess = () => {
+                if (readingReq.result) results.push(...readingReq.result);
+                checkDone();
+            };
+            readingReq.onerror = () => checkDone();
+        });
     });
-    
-    return Array.from(uniqueResults.values());
 };

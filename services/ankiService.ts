@@ -15,7 +15,12 @@ const invoke = async (settings: AnkiSettings, action: string, params: any = {}) 
 
     const result = await response.json();
     if (result.error) {
-      throw new Error(result.error);
+      // Clean up AnkiConnect Android errors which often include Java stack traces
+      let errorMsg = result.error;
+      if (typeof errorMsg === 'string' && errorMsg.includes('java.lang.Exception')) {
+          errorMsg = errorMsg.split('java.lang.Exception:')[1]?.split('\n')[0]?.trim() || errorMsg.split('\n')[0];
+      }
+      throw new Error(errorMsg);
     }
     return result.result;
   } catch (error) {

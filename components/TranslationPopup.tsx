@@ -11,6 +11,8 @@ interface TranslationPopupProps {
   language: Language;
   onEngineChange: (engine: WebSearchEngine) => void;
   onAddAnki?: () => void;
+  onAddAnkiRef?: React.MutableRefObject<(() => void) | null>;
+  scrollRef?: React.MutableRefObject<((direction: 'up' | 'down') => void) | null>;
 }
 
 const getTargetLangCode = (appLang: Language) => {
@@ -31,13 +33,28 @@ const constructWebSearchUrl = (engine: WebSearchEngine, term: string, targetLang
 const translationEngines: WebSearchEngine[] = ['bing_trans', 'baidu_trans', 'sogou_trans'];
 
 export const TranslationPopup: React.FC<TranslationPopupProps> = ({ 
-    position, sentence, onClose, t, initialEngine, language, onEngineChange, onAddAnki
+    position, sentence, onClose, t, initialEngine, language, onEngineChange, onAddAnki, onAddAnkiRef, scrollRef
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [currentEngine, setCurrentEngine] = useState<WebSearchEngine>(translationEngines.includes(initialEngine) ? initialEngine : 'bing_trans');
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   const targetLangCode = getTargetLangCode(language);
   const url = constructWebSearchUrl(currentEngine, sentence, targetLangCode);
+
+  useEffect(() => {
+      if (onAddAnkiRef) {
+          onAddAnkiRef.current = onAddAnki || null;
+      }
+      if (scrollRef) {
+          scrollRef.current = (direction: 'up' | 'down') => {
+              if (scrollContainerRef.current) {
+                  const amount = direction === 'up' ? -100 : 100;
+                  scrollContainerRef.current.scrollBy({ top: amount, behavior: 'smooth' });
+              }
+          };
+      }
+  }, [onAddAnki, onAddAnkiRef, scrollRef]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -50,6 +67,9 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
   const handleEngineChange = (engine: WebSearchEngine) => {
       setCurrentEngine(engine);
       onEngineChange(engine);
+      if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = 0;
+      }
   };
 
   const style: React.CSSProperties = {
@@ -78,21 +98,21 @@ export const TranslationPopup: React.FC<TranslationPopupProps> = ({
                     <option value="baidu_trans">Baidu</option>
                     <option value="sogou_trans">Sogou</option>
                 </select>
-            </div>
-            <div className="flex items-center gap-2">
                 {onAddAnki && (
-                    <button onClick={onAddAnki} className="text-slate-400 hover:text-indigo-500 p-1" title={t.saveToAnki}>
+                    <button onClick={onAddAnki} className="text-slate-400 hover:text-indigo-500 p-1 ml-1" title={t.saveToAnki}>
                         <i className="fa-solid fa-plus-circle text-xs"></i>
                     </button>
                 )}
+            </div>
+            <div className="flex items-center gap-2">
                 <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><i className="fa-solid fa-times text-xs"></i></button>
             </div>
         </div>
         
-        <div className="flex-1 bg-gray-100 dark:bg-black">
+        <div ref={scrollContainerRef} className="flex-1 bg-gray-100 dark:bg-black overflow-y-auto scroll-smooth">
             <iframe 
                 src={url} 
-                className="w-full h-full border-none bg-white" 
+                className="w-full h-[2000px] border-none bg-white" 
                 title={t.sentenceTranslation}
                 sandbox="allow-same-origin allow-scripts allow-forms"
             />

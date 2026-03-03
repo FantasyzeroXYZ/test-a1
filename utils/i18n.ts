@@ -256,7 +256,17 @@ export const translations = {
     sourceReading: "[Reading]",
     addCardFor: "Add Card for \"{word}\"",
     addAllInTab: "Add All ({count})",
-    sentenceTranslation: "Sentence Translation"
+    sentenceTranslation: "Sentence Translation",
+    keyToggleTranslation: "Toggle Translation",
+    keyToggleYomitan: "Toggle Yomitan",
+    keyToggleSentenceRepeat: "Toggle Sentence Repeat",
+    keyToggleABLoop: "Toggle AB Loop",
+    autoCloseDictAfterAnki: "Auto-close after Anki add",
+    cardExportMode: "Card Export Mode",
+    anki: "Anki",
+    table: "Table",
+    keyScrollUp: "Scroll Up",
+    keyScrollDown: "Scroll Down"
   },
   zh: {
     appTitle: "LinguaFlow",
@@ -513,7 +523,17 @@ export const translations = {
     sourceReading: "[读音]",
     addCardFor: "添加卡片: \"{word}\"",
     addAllInTab: "添加全部 ({count})",
-    sentenceTranslation: "句子翻译"
+    sentenceTranslation: "句子翻译",
+    keyToggleTranslation: "切换翻译显示",
+    keyToggleYomitan: "切换 Yomitan 模式",
+    keyToggleSentenceRepeat: "切换单句循环",
+    keyToggleABLoop: "切换 AB 循环",
+    autoCloseDictAfterAnki: "制卡后自动关闭词典",
+    cardExportMode: "制卡导出模式",
+    anki: "Anki",
+    table: "表格",
+    keyScrollUp: "向上滚动",
+    keyScrollDown: "向下滚动"
   }
 };
 

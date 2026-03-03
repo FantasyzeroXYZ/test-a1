@@ -28,6 +28,7 @@ interface SubtitleRendererProps {
   yomitanHighlight?: { lineId: string; start: number; length: number; pinned?: boolean }; 
   showSubtitles?: boolean;
   onTranslateClick?: (event: React.MouseEvent, line: SubtitleLine) => void;
+  currentTime: number;
 }
 
 const LARGE_DATASET_THRESHOLD = 100;
@@ -214,7 +215,7 @@ const SubtitleItem = memo(({
 });
 
 export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({ 
-  subtitles, activeSubtitleIndex, onSeek, gameType, language, learningLanguage, fontSize, onWordClick, onSentenceClick, onTextHover, onTextClick, onTranslateClick, segmentationMode, onAutoSegment, isScanning, onShiftTimeline, subtitleMode, dictMode, yomitanMode, yomitanHighlight, showSubtitles = true
+  subtitles, activeSubtitleIndex, onSeek, gameType, language, learningLanguage, fontSize, onWordClick, onSentenceClick, onTextHover, onTextClick, onTranslateClick, segmentationMode, onAutoSegment, isScanning, onShiftTimeline, subtitleMode, dictMode, yomitanMode, yomitanHighlight, currentTime, showSubtitles = true
 }) => {
   const t = getTranslation(language);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -241,12 +242,20 @@ export const SubtitleRenderer: React.FC<SubtitleRendererProps> = memo(({
   }, [activeSubtitleIndex, isLargeDataset, subtitleMode]);
 
   const visibleLines = useMemo(() => {
+    if (activeSubtitleIndex === -1 && subtitleMode === 'scroll' && isLargeDataset) {
+        // Find the nearest subtitle to current time to avoid flashing index 0
+        const nearestIdx = subtitles.findIndex(s => s.start > currentTime);
+        const baseIdx = nearestIdx === -1 ? subtitles.length - 1 : Math.max(0, nearestIdx - 1);
+        const start = Math.max(0, baseIdx - SLICE_RANGE);
+        const end = Math.min(subtitles.length, baseIdx + SLICE_RANGE + 1);
+        return subtitles.slice(start, end);
+    }
     if (subtitleMode === 'single') return activeSubtitleIndex !== -1 ? [subtitles[activeSubtitleIndex]] : [];
     if (!isLargeDataset) return subtitles;
     const start = Math.max(0, activeSubtitleIndex - SLICE_RANGE);
     const end = Math.min(subtitles.length, activeSubtitleIndex + SLICE_RANGE + 1);
     return subtitles.slice(start, end);
-  }, [subtitles, activeSubtitleIndex, isLargeDataset, subtitleMode]);
+  }, [subtitles, activeSubtitleIndex, isLargeDataset, subtitleMode, currentTime]);
 
   if (subtitles.length === 0) {
     return (

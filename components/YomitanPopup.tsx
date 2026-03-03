@@ -26,6 +26,7 @@ interface YomitanPopupProps {
   learningLanguage: LearningLanguage;
   ttsSettings: { enabled: boolean; rate: number; pitch: number; volume: number; voice: string };
   loading?: boolean;
+  scrollRef?: React.MutableRefObject<((direction: 'up' | 'down') => void) | null>;
 }
 
 // Structured content renderer for JSON definitions
@@ -122,9 +123,10 @@ const WordDefinition: React.FC<{
 };
 
 export const YomitanPopup: React.FC<YomitanPopupProps> = ({ 
-    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t, learningLanguage, ttsSettings, loading
+    position, results, activeSegmentIndex, onSelectSegment, seenWords, onClose, onAddCard, onAddAllCardsInTab, t, learningLanguage, ttsSettings, loading, scrollRef
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -134,11 +136,22 @@ export const YomitanPopup: React.FC<YomitanPopupProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
+  useEffect(() => {
+      if (scrollRef) {
+          scrollRef.current = (direction: 'up' | 'down') => {
+              if (scrollContainerRef.current) {
+                  const amount = direction === 'up' ? -100 : 100;
+                  scrollContainerRef.current.scrollBy({ top: amount, behavior: 'smooth' });
+              }
+          };
+      }
+  }, [scrollRef]);
+
   const style: React.CSSProperties = {
     position: 'fixed',
     left: Math.min(window.innerWidth - 340, Math.max(10, position.x - 160)), 
-    top: Math.min(window.innerHeight - 450, position.y + 25), 
-    maxHeight: '400px',
+    top: Math.min(window.innerHeight - 500, position.y + 25), 
+    maxHeight: '480px',
     zIndex: 1000, 
   };
   
@@ -193,7 +206,7 @@ export const YomitanPopup: React.FC<YomitanPopupProps> = ({
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><i className="fa-solid fa-times text-xs"></i></button>
         </div>
         
-        <div className="overflow-y-auto flex-1 bg-slate-100 dark:bg-slate-800">
+        <div ref={scrollContainerRef} className="overflow-y-auto flex-1 bg-slate-100 dark:bg-slate-800">
             {activeResult.foundWords.map((wordMatch, index) => {
                 const allTags = new Set<string>();
                 wordMatch.result.entries.forEach(e => e.tags?.forEach(t => allTags.add(t)));

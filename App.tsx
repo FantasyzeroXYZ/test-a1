@@ -29,11 +29,37 @@ import { extractAudioClip } from './utils/audioUtils';
 import { useGamepad } from './hooks/useGamepad';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
-  theme: 'light', language: 'zh', learningLanguage: 'en', subtitleMode: 'scroll', subtitleFontSize: 20, segmentationMode: 'browser',
-  playbackMode: 'normal', webSearchEngine: 'bing_trans', webLinkMode: 'inline', copyToClipboard: false, dictMode: 'word',
-  dictExportMode: 'anki', ankiBoldWord: true, yomitanMode: false, yomitanModeType: 'comprehensive', enablePreprocessing: false,
-  ttsEnabled: true, ttsVoice: '', ttsRate: 1, ttsPitch: 1, ttsVolume: 1,
-  keybindings: { library: { import: 'KeyI', settings: 'KeyS' }, player: { playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD' }, dictionary: { close: 'Escape', addAnki: 'KeyA', replay: 'KeyR' } },
+  theme: 'light',
+  language: 'zh',
+  learningLanguage: 'en',
+  subtitleMode: 'scroll',
+  subtitleFontSize: 20,
+  segmentationMode: 'browser',
+  playbackMode: 'normal',
+  webSearchEngine: 'bing_trans',
+  webLinkMode: 'inline',
+  copyToClipboard: false,
+  dictMode: 'word',
+  dictExportMode: 'anki',
+  ankiBoldWord: true,
+  yomitanMode: false,
+  yomitanModeType: 'comprehensive',
+  autoCloseDictAfterAnki: false,
+  enablePreprocessing: false,
+  ttsEnabled: true,
+  ttsVoice: '',
+  ttsRate: 1,
+  ttsPitch: 1,
+  ttsVolume: 1,
+  keybindings: { 
+      library: { import: 'KeyI', settings: 'KeyS' }, 
+      player: { 
+          playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD',
+          toggleTranslation: 'KeyT', toggleYomitan: 'KeyY', toggleSentenceRepeat: 'KeyR', toggleABLoop: 'KeyA',
+          scrollUp: 'ArrowUp', scrollDown: 'ArrowDown'
+      }, 
+      dictionary: { close: 'Escape', addAnki: 'KeyA', replay: 'KeyR', scrollUp: 'ArrowUp', scrollDown: 'ArrowDown' } 
+  },
   inputSource: 'keyboard'
 };
 
@@ -124,6 +150,12 @@ const App: React.FC = () => {
   const [loopB, setLoopB] = useState<number | null>(null);
   const [isSentenceRepeat, setIsSentenceRepeat] = useState(false);
 
+  const dictAddAnkiRef = useRef<(() => void) | null>(null);
+  const dictScrollRef = useRef<((direction: 'up' | 'down') => void) | null>(null);
+  const yomitanScrollRef = useRef<((direction: 'up' | 'down') => void) | null>(null);
+  const transAddAnkiRef = useRef<(() => void) | null>(null);
+  const transScrollRef = useRef<((direction: 'up' | 'down') => void) | null>(null);
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const wasPlayingRef = useRef(false);
   const [hasDictionaries, setHasDictionaries] = useState(false);
@@ -160,6 +192,16 @@ const App: React.FC = () => {
   } | null>(null);
 
   const [seenWords, setSeenWords] = useState(new Set<string>());
+  const searchCache = useRef<Map<string, DictionaryResult[]>>(new Map());
+
+  // Persist Settings
+  useEffect(() => {
+    localStorage.setItem('lf_settings_v5', JSON.stringify(settings));
+  }, [settings]);
+
+  useEffect(() => {
+    localStorage.setItem('lf_anki', JSON.stringify(ankiSettings));
+  }, [ankiSettings]);
 
   // Dark Mode Effect
   useEffect(() => {
@@ -340,7 +382,8 @@ const App: React.FC = () => {
   const handleImportLink = async (url: string, category: 'music' | 'audiobook') => {
       try {
           const id = crypto.randomUUID();
-          const title = url.split('/').pop()?.split('?')[0] || 'Unknown Stream';
+          let title = url.split('/').pop()?.split('?')[0] || 'Unknown Stream';
+          title = title.replace(/\.[^/.]+$/, ""); // Remove extension
           
           const newTrack: AudioTrack = { 
               id, 
@@ -354,9 +397,11 @@ const App: React.FC = () => {
           await saveTrackToDB(newTrack);
           setAudioTracks(prev => [...prev, newTrack]);
           showToast(t.importSuccess);
+          return newTrack;
       } catch (err) {
           console.error(err);
           showToast(t.importFailed, 'error');
+          return null;
       }
   };
 
@@ -448,46 +493,82 @@ const App: React.FC = () => {
 
     pauseForLookup(); 
 
-    for (const segment of scanSegments) {
+    // Collect all terms to search across all segments to batch them
+    const allTermsToSearch = new Set<string>();
+    const segmentData = scanSegments.map(segment => {
         const raw = segment.term;
-        const foundWords: YomitanAnalysisResult['foundWords'] = [];
-        const termsToSearch = new Set<string>();
+        const terms = new Set<string>();
         const deinflections: DeinflectionResult[] = [];
         
-        termsToSearch.add(raw);
+        terms.add(raw);
         let hiragana = '';
 
         if (learningLang === 'ja') {
             const fullWidth = convertHalfWidthKanaToFullWidth(raw);
             const normalized = normalizeCombiningCharacters(fullWidth);
-            termsToSearch.add(fullWidth);
-            termsToSearch.add(normalized);
+            terms.add(fullWidth);
+            terms.add(normalized);
             
             if (settings.enablePreprocessing || isStringPartiallyJapanese(raw)) {
                 hiragana = convertKatakanaToHiragana(normalized);
-                termsToSearch.add(hiragana);
+                terms.add(hiragana);
 
+                // Treat raw/hiragana as reading and deinflect it
                 const deinflectionResults = deinflector.deinflect(hiragana, 'ja');
                 deinflections.push(...deinflectionResults);
                 deinflectionResults.forEach(d => {
-                    termsToSearch.add(d.term);
+                    terms.add(d.term);
                     const deinflectedReading = convertKatakanaToHiragana(d.term);
-                    if (deinflectedReading !== d.term) termsToSearch.add(deinflectedReading);
+                    if (deinflectedReading !== d.term) terms.add(deinflectedReading);
                 });
+
+                // Add raw as a potential reading search term
+                terms.add(raw);
+                if (hiragana !== raw) terms.add(hiragana);
             }
         } else if (learningLang === 'en') {
-            termsToSearch.add(raw.toLowerCase());
+            terms.add(raw.toLowerCase());
             if (settings.enablePreprocessing) {
                 const deinflectionResults = deinflector.deinflect(raw.toLowerCase(), 'en');
                 deinflections.push(...deinflectionResults);
-                deinflectionResults.forEach(d => termsToSearch.add(d.term));
+                deinflectionResults.forEach(d => terms.add(d.term));
             }
         }
+        
+        terms.forEach(t => allTermsToSearch.add(t));
+        return { raw, terms, deinflections, hiragana, start: segment.start };
+    });
 
-        const searchResults = await batchSearchTerms(Array.from(termsToSearch), scope);
+    // Check cache first
+    const missingTerms = Array.from(allTermsToSearch).filter(t => !searchCache.current.has(t));
+    if (missingTerms.length > 0) {
+        const batchResults = await batchSearchTerms(missingTerms, scope);
+        // Map results back to the terms that might have found them
+        missingTerms.forEach(term => {
+            const termHira = convertKatakanaToHiragana(term);
+            const matches = batchResults.filter(r => 
+                r.word === term || 
+                r.word === termHira ||
+                r.entries.some(e => e.pronunciations.some(p => p.text === term || p.text === termHira))
+            );
+            searchCache.current.set(term, matches);
+        });
+    }
+
+    for (const data of segmentData) {
+        const { raw, terms, deinflections, hiragana } = data;
+        const foundWords: YomitanAnalysisResult['foundWords'] = [];
+        
+        // Get results from cache
+        const searchResults: DictionaryResult[] = [];
+        terms.forEach(t => {
+            const cached = searchCache.current.get(t);
+            if (cached) searchResults.push(...cached);
+        });
 
         if (searchResults.length > 0) {
             for (const res of searchResults) {
+                // ... same matching logic as before ...
                 if (learningLang === 'ja') {
                     if (raw === res.word || normalizeCombiningCharacters(raw) === res.word || hiragana === res.word) {
                         foundWords.push({ result: res, source: 'direct' });
@@ -497,16 +578,24 @@ const App: React.FC = () => {
                             foundWords.push({ result: res, source: 'deinflected', reason: deinflectedHeadwordMatch.reasons.join(' ← ') });
                         } else {
                             const originalReadingMatch = hiragana && res.entries.some(e => e.pronunciations.some(p => p.text === hiragana));
-                            
                             const deinflectedReadingMatch = deinflections.find(d => {
                                 const termHira = convertKatakanaToHiragana(d.term);
                                 return res.entries.some(e => e.pronunciations.some(p => p.text === d.term || p.text === termHira));
                             });
 
-                            if (originalReadingMatch) {
+                            // Also check if the raw/hiragana itself matches a reading in the dictionary
+                            const rawReadingMatch = res.entries.some(e => e.pronunciations.some(p => p.text === raw || p.text === hiragana));
+                            
+                            // Check if any deinflected term matches a reading in the dictionary
+                            const deinflectedTermAsReadingMatch = deinflections.find(d => {
+                                const termHira = convertKatakanaToHiragana(d.term);
+                                return res.entries.some(e => e.pronunciations.some(p => p.text === d.term || p.text === termHira));
+                            });
+
+                            if (originalReadingMatch || rawReadingMatch) {
                                 foundWords.push({ result: res, source: 'reading' });
-                            } else if (deinflectedReadingMatch) {
-                                foundWords.push({ result: res, source: 'deinflected', secondarySource: 'reading', reason: deinflectedReadingMatch.reasons.join(' ← ') });
+                            } else if (deinflectedReadingMatch || deinflectedTermAsReadingMatch) {
+                                foundWords.push({ result: res, source: 'deinflected', secondarySource: 'reading', reason: (deinflectedReadingMatch || deinflectedTermAsReadingMatch)?.reasons.join(' ← ') });
                             }
                         }
                     }
@@ -701,6 +790,12 @@ const App: React.FC = () => {
           }
       }
       setYomitanPopup(p => p ? {...p, pinned: false } : null); // Unpin after adding
+      
+      if (settings.autoCloseDictAfterAnki) {
+          setYomitanPopup(null);
+          setDictionaryModalState(prev => ({ ...prev, isOpen: false }));
+          resumeAfterLookup();
+      }
   };
 
   const handleAddAllCardsInTab = async (results: DictionaryResult[]) => {
@@ -710,40 +805,66 @@ const App: React.FC = () => {
   };
   
   const handleRewind = () => {
-    if (!audioRef.current || subtitles.length === 0) return;
+    if (!audioRef.current) return;
+    const current = audioRef.current.currentTime;
     
-    // Always go to the start of the previous subtitle if possible
-    let targetIndex = -1;
-    
-    if (activeSubtitleIndex > 0) {
-        targetIndex = activeSubtitleIndex - 1;
-    } else if (activeSubtitleIndex === 0) {
-        // If at first subtitle, just restart it
-        targetIndex = 0;
-    } else {
-        // If not in a subtitle, find the one before current time
-        const current = audioRef.current.currentTime;
-        const lastSubIndex = subtitles.findLastIndex(s => s.end <= current);
-        if (lastSubIndex !== -1) {
-            targetIndex = lastSubIndex;
-        } else {
-            targetIndex = 0;
-        }
+    if (subtitles.length === 0) {
+        const target = Math.max(0, current - 10);
+        audioRef.current.currentTime = target;
+        setCurrentTime(target);
+        return;
     }
     
-    const newTime = subtitles[targetIndex].start;
-    audioRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
+    const currentIndex = subtitles.findIndex(s => current >= s.start && current <= s.end);
+    let targetIndex;
+
+    if (currentIndex !== -1) {
+        const currentSub = subtitles[currentIndex];
+        if (current - currentSub.start > 1) {
+            audioRef.current.currentTime = currentSub.start;
+            setCurrentTime(currentSub.start);
+            return;
+        }
+        targetIndex = Math.max(0, currentIndex - 1);
+    } else {
+        targetIndex = subtitles.findIndex(s => s.start > current) - 1;
+        if (targetIndex < 0) targetIndex = 0;
+    }
+
+    const targetSub = subtitles[targetIndex];
+    if (targetSub) {
+        audioRef.current.currentTime = targetSub.start;
+        setCurrentTime(targetSub.start);
+    }
   };
 
   const handleForward = () => {
-    if (!audioRef.current || subtitles.length === 0) return;
+    if (!audioRef.current) return;
     const current = audioRef.current.currentTime;
-    const target = subtitles.find(s => s.start > current);
-    if (target) {
-        const newTime = target.start;
-        audioRef.current.currentTime = newTime;
-        setCurrentTime(newTime);
+    
+    if (subtitles.length === 0) {
+        const target = Math.min(duration, current + 10);
+        audioRef.current.currentTime = target;
+        setCurrentTime(target);
+        return;
+    }
+    
+    const currentIndex = subtitles.findIndex(s => current >= s.start && current <= s.end);
+    let targetIndex;
+
+    if (currentIndex === -1) {
+        targetIndex = subtitles.findIndex(s => s.start > current);
+    } else {
+        targetIndex = currentIndex + 1;
+    }
+
+    if (targetIndex !== -1 && targetIndex < subtitles.length) {
+        const targetSub = subtitles[targetIndex];
+        if (audioRef.current) {
+            audioRef.current.currentTime = targetSub.start;
+            setCurrentTime(targetSub.start);
+            // If paused, we might need to force an update or just rely on state
+        }
     }
   };
 
@@ -775,11 +896,13 @@ const App: React.FC = () => {
       if (!track) return;
       
       const newBookmarks = [...(track.bookmarks || [])];
-      const existingIdx = newBookmarks.findIndex(b => b.id === bm.id);
+      const bookmarkToSave = { ...bm, id: bm.id || crypto.randomUUID() };
+      
+      const existingIdx = newBookmarks.findIndex(b => b.id === bookmarkToSave.id);
       if (existingIdx !== -1) {
-          newBookmarks[existingIdx] = bm;
+          newBookmarks[existingIdx] = bookmarkToSave;
       } else {
-          newBookmarks.push(bm);
+          newBookmarks.push(bookmarkToSave);
       }
       
       const updates = { bookmarks: newBookmarks };
@@ -791,7 +914,7 @@ const App: React.FC = () => {
   useEffect(() => {
       if (subtitles.length === 0) return;
       const idx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
-      if (idx !== -1 && idx !== activeSubtitleIndex) setActiveSubtitleIndex(idx);
+      if (idx !== activeSubtitleIndex) setActiveSubtitleIndex(idx);
   }, [currentTime, subtitles, activeSubtitleIndex]);
 
   useEffect(() => {
@@ -821,7 +944,46 @@ const App: React.FC = () => {
           case 'forward': handleForward(); break;
           case 'sidebar': setShowSidePanel(prev => !prev); break;
           case 'dict': 
-              // Toggle dict or focus? For now just log or ignore
+              if (settings.yomitanMode) break;
+              if (dictionaryModalState.isOpen) {
+                  setDictionaryModalState(prev => ({ ...prev, isOpen: false }));
+                  resumeAfterLookup();
+              } else {
+                  const currentSub = activeSubtitleIndex !== -1 ? subtitles[activeSubtitleIndex] : null;
+                  setDictionaryModalState({
+                      isOpen: true,
+                      initialWord: '',
+                      initialSegmentIndex: -1,
+                      sentence: currentSub ? currentSub.text : '',
+                      contextLine: currentSub || { id: '0', start: 0, end: 0, text: '' }
+                  });
+                  pauseForLookup();
+              }
+              break;
+          case 'toggleTranslation':
+              if (translationPopup?.visible) {
+                  setTranslationPopup(null);
+                  resumeAfterLookup();
+              } else if (activeSubtitleIndex !== -1 && subtitles[activeSubtitleIndex]) {
+                  setTranslationPopup({
+                      visible: true,
+                      x: window.innerWidth / 2,
+                      y: window.innerHeight / 2,
+                      sentence: subtitles[activeSubtitleIndex].text
+                  });
+                  pauseForLookup();
+              }
+              break;
+          case 'toggleYomitan':
+              setSettings(s => ({ ...s, yomitanMode: !s.yomitanMode }));
+              showToast(!settings.yomitanMode ? t.yomitanModeEnabled : t.yomitanModeDisabled);
+              break;
+          case 'toggleSentenceRepeat':
+              setIsSentenceRepeat(prev => !prev);
+              showToast(!isSentenceRepeat ? t.sentenceRepeatEnabled : t.sentenceRepeatDisabled);
+              break;
+          case 'toggleABLoop':
+              handleABLoopToggle();
               break;
           case 'import': 
               if (view === 'library') {
@@ -836,10 +998,28 @@ const App: React.FC = () => {
               resumeAfterLookup();
               break;
           case 'addAnki':
-               // If in dictionary mode and something is open, add it
-               if (dictionaryModalState.isOpen) {
-                   // Trigger add anki in modal? 
-                   // We need a ref to the modal or expose a function
+               if (dictionaryModalState.isOpen && dictAddAnkiRef.current) {
+                   dictAddAnkiRef.current();
+               } else if (translationPopup?.visible && transAddAnkiRef.current) {
+                   transAddAnkiRef.current();
+               }
+               break;
+          case 'scrollUp':
+               if (dictionaryModalState.isOpen && dictScrollRef.current) {
+                   dictScrollRef.current('up');
+               } else if (yomitanPopup?.visible && yomitanScrollRef.current) {
+                   yomitanScrollRef.current('up');
+               } else if (translationPopup?.visible && transScrollRef.current) {
+                   transScrollRef.current('up');
+               }
+               break;
+          case 'scrollDown':
+               if (dictionaryModalState.isOpen && dictScrollRef.current) {
+                   dictScrollRef.current('down');
+               } else if (yomitanPopup?.visible && yomitanScrollRef.current) {
+                   yomitanScrollRef.current('down');
+               } else if (translationPopup?.visible && transScrollRef.current) {
+                   transScrollRef.current('down');
                }
                break;
           case 'replay':
@@ -847,7 +1027,7 @@ const App: React.FC = () => {
                break;
       }
       return true;
-  }, [view, dictionaryModalState.isOpen, yomitanPopup, translationPopup, settings.keybindings, isPlaying, safePause, safePlay, handleRewind, handleForward, subtitles, activeSubtitleIndex]);
+  }, [view, dictionaryModalState.isOpen, yomitanPopup, translationPopup, settings, isPlaying, safePause, safePlay, handleRewind, handleForward, subtitles, activeSubtitleIndex, isSentenceRepeat, handleABLoopToggle, t]);
 
   useEffect(() => {
       const onKeyDown = (e: KeyboardEvent) => {
@@ -922,7 +1102,7 @@ const App: React.FC = () => {
            }} language={settings.language} onTrackDelete={async id => { await deleteTrackFromDB(id); setAudioTracks(prev => prev.filter(t => t.id !== id)); }} onTrackUpdate={(id, up) => { setAudioTracks(prev => prev.map(t => t.id === id ? {...t, ...up} : t)); updateTrackMetadataInDB(id, up); }} onImport={handleImport} onReplaceFile={()=>{}} onImportLink={handleImportLink} onImportSubtitle={handleImportSubtitle} isImporting={isImporting} />
          ) : (
            <div className="flex-1 flex flex-col h-full relative">
-              <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} gameType="none" language={settings.language} learningLanguage={scope} fontSize={settings.subtitleFontSize} onWordClick={handleWordClick} onSentenceClick={handleSentenceClick} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} dictMode={settings.dictMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} />
+              <SubtitleRenderer subtitles={subtitles} activeSubtitleIndex={activeSubtitleIndex} onSeek={t => { if(audioRef.current) { audioRef.current.currentTime=t; setCurrentTime(t); } }} gameType="none" language={settings.language} learningLanguage={scope} fontSize={settings.subtitleFontSize} onWordClick={handleWordClick} onSentenceClick={handleSentenceClick} onTextHover={handleYomitanHover} onTextClick={handleYomitanClick} onTranslateClick={handleTranslateClick} segmentationMode={settings.segmentationMode} onAutoSegment={()=>{}} isScanning={false} onShiftTimeline={()=>{}} subtitleMode={settings.subtitleMode} dictMode={settings.dictMode} showSubtitles={true} yomitanMode={settings.yomitanMode} yomitanHighlight={yomitanPopup ? { ...yomitanPopup.highlight!, pinned: yomitanPopup.pinned } : undefined} currentTime={currentTime} />
               
               <SidePanel 
                   isOpen={showSidePanel} 
@@ -987,6 +1167,8 @@ const App: React.FC = () => {
                     hasDictionaries={hasDictionaries}
                     onAnkiSuccess={() => { showToast(t.ankiSuccess); }}
                     onTableSuccess={() => { showToast(t.addedToTable); }}
+                    onAddAnkiRef={dictAddAnkiRef}
+                    scrollRef={dictScrollRef}
                 />
               )}
               {yomitanPopup && yomitanPopup.visible && (
@@ -1005,6 +1187,7 @@ const App: React.FC = () => {
                     t={t}
                     learningLanguage={scope}
                     ttsSettings={ttsSettings}
+                    scrollRef={yomitanScrollRef}
                   />
               )}
               {translationPopup && translationPopup.visible && (
@@ -1020,6 +1203,8 @@ const App: React.FC = () => {
                       language={settings.language}
                       onEngineChange={(engine) => setSettings({...settings, webSearchEngine: engine})}
                       onAddAnki={() => handleAddSentenceCard(translationPopup.sentence)}
+                      onAddAnkiRef={transAddAnkiRef}
+                      scrollRef={transScrollRef}
                   />
               )}
               <PlayerControls 

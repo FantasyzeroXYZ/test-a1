@@ -128,7 +128,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               alert(t.ankiNotConnected);
           }
       } catch (e) {
-          alert(t.ankiNotConnected);
+          alert(`${t.ankiNotConnected}: ${e instanceof Error ? e.message : String(e)}`);
           setAnkiConnected(false);
       }
   };
@@ -200,10 +200,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       if (confirm(t.resetShortcutsConfirm)) {
            const defaults: SceneKeybindings = {
              library: { import: 'KeyI', settings: 'KeyS' },
-             player: { playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD' },
-             dictionary: { close: 'Escape', addAnki: 'KeyA', replay: 'KeyR' }
+             player: { 
+                 playPause: 'Space', rewind: 'ArrowLeft', forward: 'ArrowRight', sidebar: 'KeyL', dict: 'KeyD',
+                 toggleTranslation: 'KeyT', toggleYomitan: 'KeyY', toggleSentenceRepeat: 'KeyR', toggleABLoop: 'KeyA',
+                 scrollUp: 'ArrowUp', scrollDown: 'ArrowDown'
+             },
+             dictionary: { close: 'Escape', addAnki: 'KeyA', replay: 'KeyR', scrollUp: 'ArrowUp', scrollDown: 'ArrowDown' }
            };
            setTempKeybindings(defaults);
+           setIsKeyBindingActive(true);
       }
   };
 
@@ -403,7 +408,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const getActionLabel = (key: string) => {
-      const map: Record<string, string> = { 'playPause': t.keyPlayPause, 'rewind': t.keyRewind, 'forward': t.keyForward, 'sidebar': t.keySidebar, 'dict': t.keyDict, 'close': t.keyClose, 'addAnki': t.keyAddAnki, 'replay': t.keyReplay, 'import': t.keyImport, 'settings': t.keySettings };
+      const map: Record<string, string> = { 
+          'playPause': t.keyPlayPause, 
+          'rewind': t.keyRewind, 
+          'forward': t.keyForward, 
+          'sidebar': t.keySidebar, 
+          'dict': t.keyDict, 
+          'close': t.keyClose, 
+          'addAnki': t.keyAddAnki, 
+          'replay': t.keyReplay, 
+          'import': t.keyImport, 
+          'settings': t.keySettings,
+          'toggleTranslation': t.keyToggleTranslation,
+          'toggleYomitan': t.keyToggleYomitan,
+          'toggleSentenceRepeat': t.keyToggleSentenceRepeat,
+          'toggleABLoop': t.keyToggleABLoop,
+          'scrollUp': t.keyScrollUp,
+          'scrollDown': t.keyScrollDown
+      };
       return map[key] || key;
   };
 
@@ -494,7 +516,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <div className="p-4 bg-white dark:bg-slate-800/30 transition-colors space-y-4">
                {/* Export Mode Toggle */}
                <div className="border-b border-gray-200 dark:border-slate-700 pb-4">
-                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Card Export Mode</label>
+                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.cardExportMode}</label>
                    <div className="flex bg-gray-100 dark:bg-slate-900 rounded p-1 border border-gray-200 dark:border-slate-700">
                        <button 
                            onClick={() => setReaderSettings({...readerSettings, dictExportMode: 'anki'})} 
@@ -506,7 +528,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                            onClick={() => setReaderSettings({...readerSettings, dictExportMode: 'table'})} 
                            className={`flex-1 py-1.5 text-xs rounded transition-all ${readerSettings.dictExportMode === 'table' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500'}`}
                        >
-                           Table
+                           {t.table}
                        </button>
                    </div>
                </div>
@@ -554,16 +576,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <input type="checkbox" checked={readerSettings.yomitanMode} onChange={e => setReaderSettings({...readerSettings, yomitanMode: e.target.checked})} className="accent-indigo-600" />
                     </div>
                     {readerSettings.yomitanMode && (
-                        <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.lookupMode}</label>
-                            <select 
-                                value={readerSettings.yomitanModeType} 
-                                onChange={e => setReaderSettings({...readerSettings, yomitanModeType: e.target.value as YomitanModeType})}
-                                className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none"
-                            >
-                                <option value="fast">{t.lookupFast}</option>
-                                <option value="comprehensive">{t.lookupComprehensive}</option>
-                            </select>
+                        <div className="space-y-2">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">{t.lookupMode}</label>
+                                <select 
+                                    value={readerSettings.yomitanModeType} 
+                                    onChange={e => setReaderSettings({...readerSettings, yomitanModeType: e.target.value as YomitanModeType})}
+                                    className="w-full bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-white p-2 rounded border border-gray-300 dark:border-slate-700 outline-none"
+                                >
+                                    <option value="fast">{t.lookupFast}</option>
+                                    <option value="comprehensive">{t.lookupComprehensive}</option>
+                                </select>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-700 dark:text-slate-300">{t.autoCloseDictAfterAnki}</span>
+                                <input type="checkbox" checked={readerSettings.autoCloseDictAfterAnki} onChange={e => setReaderSettings({...readerSettings, autoCloseDictAfterAnki: e.target.checked})} className="accent-indigo-600" />
+                            </div>
                         </div>
                     )}
                </div>

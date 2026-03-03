@@ -13,7 +13,7 @@ interface LibraryProps {
   onImport: (e: React.ChangeEvent<HTMLInputElement>, category: 'music' | 'audiobook') => void;
   onReplaceFile: (trackId: string, file: File) => void;
   onUpdateTrackUrl?: (trackId: string, newUrl: string) => void;
-  onImportLink: (url: string, category: 'music' | 'audiobook') => void;
+  onImportLink: (url: string, category: 'music' | 'audiobook') => Promise<AudioTrack | null>;
   onImportSubtitle: (trackId: string, file: File, isSecondary: boolean) => void;
   language: Language;
   isImporting?: boolean; // New prop for loading state
@@ -82,11 +82,14 @@ export const Library: React.FC<LibraryProps> = ({
     }
   };
 
-  const submitLink = () => {
+  const submitLink = async () => {
     if (linkUrl.trim()) {
-      onImportLink(linkUrl.trim(), activeTab);
+      const newTrack = await onImportLink(linkUrl.trim(), activeTab);
       setLinkUrl('');
       setShowLinkInput(false);
+      if (newTrack) {
+          setEditingTrack(newTrack);
+      }
     }
   };
 

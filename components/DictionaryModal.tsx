@@ -30,6 +30,8 @@ interface Props {
   hasDictionaries: boolean; 
   onAnkiSuccess?: () => void;
   onTableSuccess?: () => void;
+  onAddAnkiRef?: React.MutableRefObject<(() => void) | null>;
+  scrollRef?: React.MutableRefObject<((direction: 'up' | 'down') => void) | null>;
 }
 
 type WebSearchCategory = 'search' | 'translate' | 'encyclopedia';
@@ -119,7 +121,8 @@ const formatContentPlain = (content: any, depth: number = 0): string => {
 const DictionaryModal: React.FC<Props> = ({ 
   isOpen, onClose, initialWord, initialSegmentIndex, sentence, contextLine, 
   language, learningLanguage, ankiSettings, segmentationMode, webSearchEngine: defaultWebEngine, currentTrack, audioRef, ttsSettings,
-  settings, setSettings, hasDictionaries, onAnkiSuccess, onTableSuccess
+  settings, setSettings, hasDictionaries, onAnkiSuccess, onTableSuccess,
+  onAddAnkiRef, scrollRef
 }) => {
   const t = getTranslation(language);
   const effectiveLearningLang = currentTrack?.language || learningLanguage;
@@ -158,6 +161,10 @@ const DictionaryModal: React.FC<Props> = ({
       return (stored === 'api' || stored === 'local') ? stored : (hasDictionaries ? 'local' : 'api');
   });
 
+  const currentData = dictSource === 'api' ? apiData : localData;
+  const currentLoading = dictSource === 'api' ? apiLoading : localLoading;
+  const currentError = dictSource === 'api' ? apiError : localError;
+
   // Custom Tab State
   const [customDef, setCustomDef] = useState('');
   const [customImage, setCustomImage] = useState<string>('');
@@ -177,6 +184,21 @@ const DictionaryModal: React.FC<Props> = ({
   const [webOverlayImage, setWebOverlayImage] = useState<string>('');
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+      if (onAddAnkiRef) {
+          onAddAnkiRef.current = () => handleAddToAnkiOrTable();
+      }
+      if (scrollRef) {
+          scrollRef.current = (direction: 'up' | 'down') => {
+              if (scrollContainerRef.current) {
+                  const amount = direction === 'up' ? -100 : 100;
+                  scrollContainerRef.current.scrollBy({ top: amount, behavior: 'smooth' });
+              }
+          };
+      }
+  }, [onAddAnkiRef, scrollRef, activeSearchTerm, currentData, activeTab, customDef, customImage, showWebOverlay, webOverlayContent, webOverlayImage]);
 
   const segments = useMemo(() => {
     if (settings.dictMode === 'sentence') {
@@ -435,10 +457,6 @@ const DictionaryModal: React.FC<Props> = ({
     window.speechSynthesis.speak(utterance);
   };
   
-  const currentData = dictSource === 'api' ? apiData : localData;
-  const currentLoading = dictSource === 'api' ? apiLoading : localLoading;
-  const currentError = dictSource === 'api' ? apiError : localError;
-
   const allHeaderTags = useMemo(() => {
     if (!currentData) return [];
     const set = new Set<string>();
@@ -810,7 +828,7 @@ const DictionaryModal: React.FC<Props> = ({
 
         <div className="flex-1 overflow-hidden relative bg-white dark:bg-slate-900 transition-colors">
           <div className={`h-full flex flex-col ${activeTab === 'dict' ? 'block' : 'hidden'}`}>
-              <div className="flex-1 overflow-y-auto p-4 yomitan-content select-text cursor-text">
+              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 yomitan-content select-text cursor-text">
                   <style>{`
                     .yomitan-content p { margin: 0 0 2px 0; }
                     .yomitan-content ul, .yomitan-content ol { padding-left: 1.2em; margin: 0 0 2px 0; }

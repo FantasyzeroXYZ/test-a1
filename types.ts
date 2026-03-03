@@ -117,7 +117,13 @@ export type YomitanModeType = 'fast' | 'comprehensive';
 export interface SceneKeybindings {
   library: Record<string, string>;
   player: Record<string, string>;
-  dictionary: Record<string, string>;
+  dictionary: {
+      close: string;
+      addAnki: string;
+      replay: string;
+      scrollUp?: string;
+      scrollDown?: string;
+  };
 }
 
 export interface ReaderSettings {
@@ -136,6 +142,7 @@ export interface ReaderSettings {
   ankiBoldWord: boolean; // New: Controls if target word is bolded in sentence
   yomitanMode: boolean; // New: Yomitan-style instant lookup
   yomitanModeType: YomitanModeType; // New: 'fast' or 'comprehensive'
+  autoCloseDictAfterAnki: boolean; // New: Auto-close dictionary after adding to Anki
   enablePreprocessing: boolean; // New: Enable/Disable text preprocessing
   ttsEnabled: boolean;
   ttsVoice: string;
